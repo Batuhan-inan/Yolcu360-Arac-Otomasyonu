@@ -449,7 +449,6 @@ namespace Arac_Kiralama
                         {
                             telefonGirildi = true; // Çift çalışmayı engelle
 
-                            /*
                             using (var db = DbHelper.GetConnection())
                             {
                                 aktifKullanici = db.QueryFirstOrDefault<kullanici>("SELECT * FROM Kullanicilar LIMIT 1");
@@ -459,7 +458,6 @@ namespace Arac_Kiralama
                             {
                                 await TelefonuGirAndDevamEt(aktifKullanici.Telefon);
                             }
-                            */
                         }
                     }
                     // 🔵 Giriş Penceresi Kapandıysa / Yoksa (Ana Arama Ekranındaysak):
@@ -478,11 +476,10 @@ namespace Arac_Kiralama
         // Program kapanırken CefSharp'ı düzgünce kapatmak için
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            // Form kapanırken HTTP dinleyiciyi durdur
-            if (httpListener != null && httpListener.IsListening)
+            // Form kapanırken dinleyiciyi durdur
+            if (tcpListener != null)
             {
-                httpListener.Stop();
-                httpListener.Close();
+                try { tcpListener.Stop(); } catch { }
             }
 
             Cef.Shutdown();
@@ -608,7 +605,7 @@ namespace Arac_Kiralama
             }
             return true; // Port müsait
         }
-        private HttpListener httpListener;
+        private System.Net.Sockets.TcpListener tcpListener;
         private async void SmsDinleyiciBaslat()
         {
             try
@@ -619,48 +616,46 @@ namespace Arac_Kiralama
                     return;
                 }
 
-                if (httpListener != null && httpListener.IsListening)
+                if (tcpListener != null)
                 {
-                    return;
+                    try { tcpListener.Stop(); } catch { }
                 }
 
-                httpListener = new HttpListener();
-                httpListener.Prefixes.Add($"http://localhost:{port}/sms/");
-                try { httpListener.Prefixes.Add($"http://192.168.1.161/:{port}/sms/"); } catch { }
+                // 🌐 IPAddress.Any ile hem localhost hem Wi-Fi IP (192.168.1.161) doğrudan dinlenir (İzin gerekmez)
+                tcpListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port);
+                tcpListener.Start();
 
-                httpListener.Start();
-
-                await Task.Run(() =>
+                await Task.Run(async () =>
                 {
-                    while (httpListener != null && httpListener.IsListening)
+                    while (tcpListener != null)
                     {
                         try
                         {
-                            var context = httpListener.GetContext();
-                            var request = context.Request;
-                            var response = context.Response;
-
-                            string gelenMetin = request.QueryString["kod"];
-
-                            if (!string.IsNullOrEmpty(gelenMetin))
+                            using (var client = await tcpListener.AcceptTcpClientAsync())
+                            using (var stream = client.GetStream())
+                            using (var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8))
+                            using (var writer = new System.IO.StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = true })
                             {
-                                Match eslesme = Regex.Match(gelenMetin, @"\d{6}");
-                                if (eslesme.Success)
+                                string istekSatiri = await reader.ReadLineAsync();
+                                if (!string.IsNullOrEmpty(istekSatiri))
                                 {
-                                    string netSmsKodu = eslesme.Value;
-
-                                    this.Invoke(new Action(() =>
+                                    string cozulmusMetin = System.Net.WebUtility.UrlDecode(istekSatiri);
+                                    Match eslesme = Regex.Match(cozulmusMetin, @"\d{6}");
+                                    if (eslesme.Success)
                                     {
-                                        SmsKodunuKutuyaYazAndDogrula(netSmsKodu);
-                                    }));
-                                }
-                            }
+                                        string netSmsKodu = eslesme.Value;
 
-                            string cevapMetni = "OK";
-                            byte[] buffer = System.Text.Encoding.UTF8.GetBytes(cevapMetni);
-                            response.ContentLength64 = buffer.Length;
-                            response.OutputStream.Write(buffer, 0, buffer.Length);
-                            response.OutputStream.Close();
+                                        this.Invoke(new Action(() =>
+                                        {
+                                            SmsKodunuKutuyaYazAndDogrula(netSmsKodu);
+                                        }));
+                                    }
+                                }
+
+                                // MacroDroid'e standart HTTP 200 yanıtı dönüyoruz
+                                string httpYanit = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nOK";
+                                await writer.WriteAsync(httpYanit);
+                            }
                         }
                         catch { }
                     }
@@ -668,7 +663,7 @@ namespace Arac_Kiralama
             }
             catch (Exception ex)
             {
-                Console.WriteLine("SMS Dinleyici Başlatılamadı: " + ex.Message);
+                Console.WriteLine("SMS TCP Dinleyici Başlatılamadı: " + ex.Message);
             }
         }
 
@@ -686,7 +681,22 @@ namespace Arac_Kiralama
 
                 await Task.Delay(rnd.Next(150, 300));
 
-                // 2. Her bir rakamı KeyDown + Char + KeyUp sırasıyla FocusOnEditableField = true olarak gönder
+                // 2. JavaScript ile değeri anında kutucuğa ve veri maskesine yerleştir
+                string jsSmsYaz = $@"
+                    (function() {{
+                        let el = document.querySelector('#sms_input');
+                        if (el) {{
+                            el.focus();
+                            el.value = '{netSmsKodu}';
+                            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                    }})();
+                ";
+                chromiumWebBrowser.ExecuteScriptAsync(jsSmsYaz);
+                await Task.Delay(rnd.Next(100, 200));
+
+                // 3. Her bir rakamı insansı tuş simülasyonu ile gönder
                 foreach (char rakam in netSmsKodu)
                 {
                     int vkCode = (int)rakam;
@@ -717,14 +727,38 @@ namespace Arac_Kiralama
                     await Task.Delay(rnd.Next(60, 150));
                 }
 
-                await Task.Delay(rnd.Next(400, 800));
+                await Task.Delay(rnd.Next(300, 500));
 
-                // 3. SMS Doğrula butonuna ('button[data-cms-key="button_apply"]') insansı fare hareketiyle tıkla
-                bool butonTiklendi = await ElemanaGercekTiklamaYap("button[data-cms-key='button_apply']");
-                if (!butonTiklendi)
+                // 4. ENTER Tuş Simülasyonu (Doğrudan Gönderim)
+                chromiumWebBrowser.GetBrowserHost().SendKeyEvent(new CefSharp.KeyEvent
                 {
-                    MessageBox.Show("SMS Doğrula butonu ('button[data-cms-key=\"button_apply\"]') bulunamadı!", "Eleman Bulunamadı ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                    Type = CefSharp.KeyEventType.KeyDown,
+                    WindowsKeyCode = (int)Keys.Enter,
+                    FocusOnEditableField = true
+                });
+                await Task.Delay(50);
+                chromiumWebBrowser.GetBrowserHost().SendKeyEvent(new CefSharp.KeyEvent
+                {
+                    Type = CefSharp.KeyEventType.KeyUp,
+                    WindowsKeyCode = (int)Keys.Enter,
+                    FocusOnEditableField = true
+                });
+
+                await Task.Delay(rnd.Next(300, 600));
+
+                // 5. 'button[data-cms-key="button_apply"]' ("Doğrula") Butonuna Tıkla
+                string jsDogrulaTikla = @"
+                    (function() {
+                        let btn = document.querySelector('button[data-cms-key=""button_apply""]') || 
+                                  Array.from(document.querySelectorAll('button')).find(b => b.innerText && b.innerText.includes('Doğrula'));
+                        if (btn) {
+                            btn.click();
+                        }
+                    })();
+                ";
+                chromiumWebBrowser.ExecuteScriptAsync(jsDogrulaTikla);
+
+                await ElemanaGercekTiklamaYap("button[data-cms-key='button_apply']");
             }
         }
 
@@ -880,7 +914,8 @@ namespace Arac_Kiralama
 
         private async Task TarihAraligiSec(DateTime alisTarihi, DateTime donusTarihi)
         {
-            string hedefAy = alisTarihi.ToString("MMMM", new System.Globalization.CultureInfo("tr-TR"));
+            string alisAy = alisTarihi.ToString("MMMM", new System.Globalization.CultureInfo("tr-TR")).ToLower();
+            string donusAy = donusTarihi.ToString("MMMM", new System.Globalization.CultureInfo("tr-TR")).ToLower();
             string baslangicGunu = alisTarihi.Day.ToString();
             string bitisGunu = donusTarihi.Day.ToString();
 
@@ -888,83 +923,105 @@ namespace Arac_Kiralama
         (async function() {{
             const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            function gercekTikla(el) {{
+            function safeClick(el) {{
                 if (!el) return;
-                el.focus();
-                
-                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {{
-                    el.dispatchEvent(new MouseEvent(evtType, {{ bubbles: true, cancelable: true, view: window }}));
+                el.focus?.();
+                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {{
+                    el.dispatchEvent(new MouseEvent(type, {{ bubbles: true, cancelable: true, view: window }}));
                 }});
                 try {{ el.click(); }} catch(e) {{}}
             }}
 
-            function gunKutusunuBul(gunStr) {{
-                let hedefSayi = parseInt(gunStr);
-                
-                let cells = Array.from(document.querySelectorAll('.dp__cell_inner, .dp__calendar_item, [class*=""cell""]')).filter(el => {{
-                    let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('dp__cell_disabled') || el.classList.contains('disabled');
-                    let txt = (el.innerText || el.textContent || '').trim();
-                    let num = parseInt(txt);
-                    return !pasif && (txt === gunStr || num === hedefSayi);
-                }});
-
-                if (cells.length > 0) return cells[0];
-
-                let tumu = Array.from(document.querySelectorAll('div, button, span, td')).filter(el => {{
-                    let txt = (el.innerText || el.textContent || '').trim();
-                    let gorunur = el.offsetWidth > 0 && el.offsetHeight > 0;
-                    let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('disabled');
-                    return gorunur && !pasif && (txt === gunStr || parseInt(txt) === hedefSayi);
-                }});
-
-                return tumu[0] || null;
-            }}
-
-            // 1. ADIM: TAKVİMİ AÇ 📅
+            // 1. Takvimi Aç 📅
             let takvimKutusu = document.querySelector('.dp__main') || document.querySelector('div[class*=""dp__main""]');
             if (takvimKutusu) {{
-                gercekTikla(takvimKutusu);
+                safeClick(takvimKutusu);
                 await bekle(600);
             }}
 
-            // 2. ADIM: HEDEF AY DÖNGÜSÜ ➡️
-            let hedefAyStr = '{hedefAy}'.toLowerCase();
-            let maxTur = 12;
-            while (maxTur-- > 0) {{
-                let ayMetin = document.querySelector('.dp__month_year_wrap')?.innerText || '';
-                if (ayMetin.toLowerCase().includes(hedefAyStr)) break;
+            // Görünür ayları oku (Sol ve Sağ takvim)
+            function getGorunurAylar() {{
+                let monthBtns = Array.from(document.querySelectorAll('button[aria-label=""Open months overlay""], .dp__month_year_select'));
+                return monthBtns.map(b => (b.innerText || b.textContent || '').trim().toLowerCase());
+            }}
 
-                let sonrakiBtn = document.querySelector('button[aria-label=""Next month""]') || document.querySelector('.dp__btn_next');
-                if (sonrakiBtn) {{
-                    gercekTikla(sonrakiBtn);
-                    await bekle(500);
+            // 2. Alış ayına ilerle ➡️
+            let hedefAlisAy = '{alisAy}'.toLowerCase();
+            let maxTur1 = 12;
+            while (maxTur1-- > 0) {{
+                let gorunurAylar = getGorunurAylar();
+                if (gorunurAylar.some(ay => ay.includes(hedefAlisAy))) break;
+
+                let nextBtns = Array.from(document.querySelectorAll('button[aria-label=""Next month""], .dp__month_year_col_nav'));
+                let nextBtn = nextBtns[nextBtns.length - 1] || nextBtns[0];
+                if (nextBtn) {{
+                    safeClick(nextBtn);
+                    await bekle(400);
                 }} else break;
             }}
 
-            // 3. ADIM: BAŞLANGIÇ GÜNÜNÜ SEÇ 🎯
-            let elBaslangic = gunKutusunuBul('{baslangicGunu}');
+            // 3. Gün Bulma Fonksiyonu
+            function gunSec(gunStr, ayStr) {{
+                let hedefSayi = parseInt(gunStr);
+                let calendars = Array.from(document.querySelectorAll('.dp__instance_calendar'));
+                
+                for (let cal of calendars) {{
+                    let calAy = (cal.querySelector('button[aria-label=""Open months overlay""]')?.innerText || '').toLowerCase();
+                    if (!ayStr || calAy.includes(ayStr)) {{
+                        let cells = Array.from(cal.querySelectorAll('.dp__cell_inner, .dp__calendar_item, [class*=""cell""]')).filter(el => {{
+                            let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('dp__cell_disabled') || el.classList.contains('disabled');
+                            let txt = (el.innerText || el.textContent || '').trim();
+                            return !pasif && (txt === gunStr || parseInt(txt) === hedefSayi);
+                        }});
+                        if (cells.length > 0) return cells[0];
+                    }}
+                }}
+
+                let allCells = Array.from(document.querySelectorAll('.dp__cell_inner, .dp__calendar_item, [class*=""cell""]')).filter(el => {{
+                    let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('dp__cell_disabled') || el.classList.contains('disabled');
+                    let txt = (el.innerText || el.textContent || '').trim();
+                    return !pasif && (txt === gunStr || parseInt(txt) === hedefSayi);
+                }});
+                return allCells[0] || null;
+            }}
+
+            // 4. Alış Gününü Seç 🎯
+            let elBaslangic = gunSec('{baslangicGunu}', hedefAlisAy);
             if (elBaslangic) {{
-                gercekTikla(elBaslangic);
+                safeClick(elBaslangic);
+            }}
+            await bekle(800);
+
+            // 5. Veriş ayına ilerle ➡️
+            let hedefDonusAy = '{donusAy}'.toLowerCase();
+            let maxTur2 = 12;
+            while (maxTur2-- > 0) {{
+                let gorunurAylar = getGorunurAylar();
+                if (gorunurAylar.some(ay => ay.includes(hedefDonusAy))) break;
+
+                let nextBtns = Array.from(document.querySelectorAll('button[aria-label=""Next month""], .dp__month_year_col_nav'));
+                let nextBtn = nextBtns[nextBtns.length - 1] || nextBtns[0];
+                if (nextBtn) {{
+                    safeClick(nextBtn);
+                    await bekle(400);
+                }} else break;
             }}
 
-            await bekle(1000);
-
-            // 4. ADIM: BİTİŞ GÜNÜNÜ SEÇ 🎯
-            let elBitis = gunKutusunuBul('{bitisGunu}');
+            // 6. Veriş Gününü Seç 🎯
+            let elBitis = gunSec('{bitisGunu}', hedefDonusAy);
             if (elBitis) {{
-                gercekTikla(elBitis);
+                safeClick(elBitis);
             }}
-
             await bekle(600);
 
-            // 5. ADIM: 💡 SEÇİLEN TARİHLERİ UYGULA (SEÇ/KAYDET BUTONUNA TIKLA) 🎯
+            // 7. Seçilen Tarihleri Onayla 🎯
             let secUygulaBtn = document.querySelector('.dp__action_select') || 
                                document.querySelector('.dp__select') || 
                                document.querySelector('button[class*=""select""]') || 
-                               Array.from(document.querySelectorAll('button')).find(b => b.innerText.toLowerCase().includes('seç') || b.innerText.toLowerCase().includes('uygula'));
+                               Array.from(document.querySelectorAll('button')).find(b => b.innerText && (b.innerText.toLowerCase().includes('seç') || b.innerText.toLowerCase().includes('uygula')));
 
             if (secUygulaBtn) {{
-                gercekTikla(secUygulaBtn);
+                safeClick(secUygulaBtn);
             }} else {{
                 document.body.click();
             }}
