@@ -1,0 +1,13 @@
+## Visual Studio & C# Build Outputs
+[Bb]in/
+[Oo]bj/
+packages/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## CefSharp & Browser Profiles
+TarayiciProfili/
+OturumVerileri.json
