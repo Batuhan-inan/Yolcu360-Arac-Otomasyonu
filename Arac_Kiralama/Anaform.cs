@@ -878,8 +878,8 @@ namespace Arac_Kiralama
 
             if (chromiumWebBrowser != null && chromiumWebBrowser.IsBrowserInitialized)
             {
-                // 1. Kutunun hazır olmasını bekle 🎯
-                bool kutuHazir = await WaitForElementAsync("#inputPickUpLocation, input[placeholder*='Alış'], input[placeholder*='Nereden']", TimeSpan.FromSeconds(5));
+                // 1. Kutunun hazır olmasını dinamik bekle 🎯
+                bool kutuHazir = await WaitForElementAsync("#inputPickUpLocation, input[placeholder*='Alış'], input[placeholder*='Nereden']", TimeSpan.FromSeconds(8));
                 if (!kutuHazir) return false;
 
                 // 2. Dispatch ile Kutuyu Temizle ve Harf Harf Yaz ⌨️
@@ -891,26 +891,24 @@ namespace Arac_Kiralama
                                     document.querySelector('input[placeholder*=""Nereden""]');
                         if (!input) return false;
 
-                        // Varsa (X) temizleme butonunu tıkla
-                        let clearBtn = input.parentElement?.querySelector('button, svg, [class*=""clear""], [class*=""close""]');
-                        if (clearBtn) {{
-                            clearBtn.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true }}));
-                        }}
-
                         input.focus();
-                        input.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true }}));
-                        input.select();
-                        await bekle(30);
+                        input.click();
+                        await bekle(50);
+
+                        // Varsa (X) temizleme butonunu tıkla
+                        let clearBtn = input.parentElement?.querySelector('button, svg, [class*=""clear""], [class*=""close""], [aria-label*=""temizle""]');
+                        if (clearBtn) {{
+                            try {{ clearBtn.click(); }} catch(e) {{}}
+                        }}
 
                         // 🧹 1. Kutuyu Boşalt ve Input/Change Event'leri Dispatch Et
                         let nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
                         if (nativeSetter) nativeSetter.call(input, '');
                         input.value = '';
-                        let trk = input._valueTracker;
-                        if (trk) trk.setValue('');
+                        if (input._valueTracker) input._valueTracker.setValue('');
                         input.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }}));
                         input.dispatchEvent(new Event('change', {{ bubbles: true, composed: true }}));
-                        await bekle(60);
+                        await bekle(80);
 
                         // ✍️ 2. Baş Harfi Düzeltilmiş Şehri Harf Harf Yaz (örn: 'Düzce')
                         let metin = '{duzenliNereden.Replace("'", "\\'")}';
@@ -952,11 +950,11 @@ namespace Arac_Kiralama
                         }}
 
                         let hedef = normalize('{duzenliNereden.Replace("'", "\\'")}');
-                        let retries = 40;
+                        let retries = 80;
                         let secilecek = null;
 
                         while (retries-- > 0) {{
-                            let items = Array.from(document.querySelectorAll('.location-item, div[class*=""location-item""]'));
+                            let items = Array.from(document.querySelectorAll('.location-item, div[class*=""location-item""], div[role=""option""], div[class*=""location""]'));
                             
                             // 🛡️ Sadece yeni aranan şehre ait gelen güncel sonuçları filtrele
                             let guncelSonuclar = items.filter(el => {{
@@ -1161,48 +1159,6 @@ namespace Arac_Kiralama
             return false;
         }
 
-        private async Task<bool> ElemanGelenekadarBekle(string elementId, int timeoutSaniye = 15)
-        {
-            // ⏱️ Zaman aşımı süresini belirliyoruz
-            DateTime bitisZamani = DateTime.Now.AddSeconds(timeoutSaniye);
-
-            while (DateTime.Now < bitisZamani)
-            {
-                try
-                {
-                    // JavaScript çalıştırılabilir durumda mı?
-                    if (chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
-                    {
-                        string script = $"document.getElementById('{elementId}') !== null;";
-                        var response = await chromiumWebBrowser.EvaluateScriptAsync(script);
-
-                        // 🟢 Eleman sayfada bulunduysa döngüden başarıyla çık
-                        if (response.Success && response.Result is bool varMi && varMi)
-                        {
-                            return true;
-                        }
-                    }
-                }
-                catch
-                {
-                    // Yönlendirme anındaki geçici hataları yut, bir sonraki turda tekrar dene
-                }
-
-                // Arka planı kilitlememek için 500 ms bekle ⏳
-                await Task.Delay(500);
-            }
-
-            // 🚨 Süre doldu ve eleman bulunamadı!
-            MessageBox.Show(
-                $"Aranan eleman ('{elementId}') {timeoutSaniye} saniye içinde bulunamadı. Lütfen sayfayı kontrol edin.",
-                "Zaman Aşımı ⏳",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
-            );
-
-            return false;
-        }
-
         // 🚪 KAMPANYA POPUP'INI OTOMATİK KAPATMA METODU
         private async Task PopupKapat()
         {
@@ -1238,18 +1194,18 @@ namespace Arac_Kiralama
                 (string.IsNullOrEmpty(yakitTuru) || yakitTuru == "Tümü")) 
                 return;
 
-            // 🛑 1. ADIM: Arama Sonuç Sayfasındaki Sol Filtre Panelinin Gelmesini Dinamik Bekle ⚡
+            // 🛑 1. ADIM: Filtre Panelini Dinamik Bekle (Sıfır Task.Delay!) ⚡
             bool panelHazir = await WaitForElementAsync("#stickyFilterCard, [id*='stickyFilter'], details[data-cms-key*='filter']", TimeSpan.FromSeconds(15));
             if (!panelHazir) return;
 
-            // 🛑 2. ADIM: <details> ve <label> Etiketlerine Tam Tıklama Gönder
+            // 🛑 2. ADIM: requestAnimationFrame ile Dinamik Tıklama ve Seçim Doğrulama
             string jsScript = $@"
         (async function() {{
-            const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            const sonrakiKare = () => new Promise(resolve => requestAnimationFrame(resolve));
 
             function safeClick(el) {{
                 if (!el) return;
-                el.scrollIntoView?.({{ block: 'center' }});
+                el.scrollIntoView?.({{ block: 'nearest' }});
                 el.focus?.();
                 ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(t => {{
                     el.dispatchEvent(new MouseEvent(t, {{ bubbles: true, cancelable: true, view: window }}));
@@ -1262,60 +1218,58 @@ namespace Arac_Kiralama
                 if (details && !details.open) {{
                     let summary = details.querySelector('summary') || details;
                     safeClick(summary);
-                    await bekle(250);
+                    await sonrakiKare();
                 }}
             }}
 
-            async function filtreSec(filterName, cmsKey) {{
+            async function filtreSecVeDogrula(filterName, cmsKey) {{
                 await akordeonGarantiAc(cmsKey);
-                await bekle(150);
-
-                let label = document.querySelector(`label[name=""${{filterName}}""]`) || 
-                            document.querySelector(`label[for=""${{filterName}}""]`) ||
-                            document.getElementById(filterName)?.closest('label');
 
                 let input = document.getElementById(filterName) || document.querySelector(`input[id=""${{filterName}}""]`);
+                let label = document.querySelector(`label[name=""${{filterName}}""]`) || 
+                            document.querySelector(`label[for=""${{filterName}}""]`) ||
+                            input?.closest('label');
 
                 if (label) {{
                     safeClick(label);
-                    await bekle(200);
                 }} else if (input) {{
                     safeClick(input);
-                    await bekle(200);
                 }}
 
-                if (input && !input.checked) {{
+                // 🎯 Kutu seçilene kadar tarayıcının render döngüsünü dinamik takip et (Kör delay yok!)
+                let deneme = 15;
+                while (deneme-- > 0 && input && !input.checked) {{
                     input.checked = true;
                     input.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    await sonrakiKare();
                 }}
+                return input ? input.checked : false;
             }}
 
             // ⚙️ 1. VİTES FİLTRESİ 🚗
             if ('{vitesTuru}' === 'Manuel') {{
-                await filtreSec('filter-transmission.1', 'filter_transmission');
+                await filtreSecVeDogrula('filter-transmission.1', 'filter_transmission');
             }}
             else if ('{vitesTuru}' === 'Otomatik') {{
-                await filtreSec('filter-transmission.2', 'filter_transmission');
+                await filtreSecVeDogrula('filter-transmission.2', 'filter_transmission');
             }}
 
-            await bekle(300);
-
-            // ⛽ 2. YAKIT FİLTRESİ ⛽
+            // ⛽ 2. YAKIT FİLTRESİ (Hem Ana Yakıt Hem Benzin/Dizel Çift Seçim) ⛽
             if ('{yakitTuru}' !== 'Tümü' && '{yakitTuru}' !== '') {{
                 if ('{yakitTuru}' === 'Benzin') {{
-                    await filtreSec('filter-fuel.1', 'filter_fuel');
-                    await filtreSec('filter-fuel.8', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.1', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.8', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Dizel') {{
-                    await filtreSec('filter-fuel.2', 'filter_fuel');
-                    await filtreSec('filter-fuel.8', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.2', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.8', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Hibrit') {{
-                    await filtreSec('filter-fuel.7', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.7', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Elektrik') {{
-                    await filtreSec('filter-fuel.11', 'filter_fuel');
+                    await filtreSecVeDogrula('filter-fuel.11', 'filter_fuel');
                 }}
             }}
 
@@ -1326,7 +1280,8 @@ namespace Arac_Kiralama
             if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
             {
                 await chromiumWebBrowser.EvaluateScriptAsync(jsScript);
-                await Task.Delay(2000);
+                // ⚡ Sabit Task.Delay yerine filtrelenmiş araçların güncellenmesini dinamik bekle!
+                await WaitForElementAsync("#car_total_price, .car-card", TimeSpan.FromSeconds(10));
             }
         }
 
