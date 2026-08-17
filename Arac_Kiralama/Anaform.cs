@@ -282,19 +282,55 @@ namespace Arac_Kiralama
             chromiumWebBrowser.Dock = DockStyle.Fill;
             panel.Controls.Add(chromiumWebBrowser);
 
-            // Otomasyon izlerini gizlemek için script 🥷
+            // Otomasyon izlerini gizlemek için gelişmiş Stealth scripti 🥷
             chromiumWebBrowser.FrameLoadStart += (sender, args) =>
             {
                 // Sadece ana sayfa (Main Frame) yüklenirken çalıştırıyoruz
                 if (args.Frame.IsMain)
                 {
-                    string hideWebdriverScript = @"
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'languages', { get: () => ['tr-TR', 'tr', 'en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] }); ";
+                    string stealthScript = @"
+                        // 1. Webdriver Gizleme
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        try { delete navigator.__proto__.webdriver; } catch(e) {}
+
+                        // 2. Diller ve Eklentiler
+                        Object.defineProperty(navigator, 'languages', { get: () => ['tr-TR', 'tr', 'en-US', 'en'] });
+                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+
+                        // 3. Donanım Özellikleri (Gerçek PC Profili)
+                        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+                        // 4. Chrome Nesnesi ve Runtime Simülasyonu
+                        if (!window.chrome) { window.chrome = {}; }
+                        if (!window.chrome.runtime) { window.chrome.runtime = {}; }
+                        if (!window.chrome.loadTimes) { window.chrome.loadTimes = function() {}; }
+                        if (!window.chrome.csi) { window.chrome.csi = function() {}; }
+                        if (!window.chrome.app) { window.chrome.app = {}; }
+
+                        // 5. WebGL Gerçek GPU Maskeleme
+                        try {
+                            const getParameter = WebGLRenderingContext.prototype.getParameter;
+                            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                                if (parameter === 37445) return 'Google Inc. (NVIDIA)';
+                                if (parameter === 37446) return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+                                return getParameter.apply(this, arguments);
+                            };
+                        } catch(e) {}
+
+                        // 6. İzinler (Permissions API)
+                        if (navigator.permissions && navigator.permissions.query) {
+                            const originalQuery = navigator.permissions.query;
+                            navigator.permissions.query = (parameters) => (
+                                parameters.name === 'notifications' ?
+                                Promise.resolve({ state: Notification.permission }) :
+                                originalQuery(parameters)
+                            );
+                        }
+                    ";
 
                     // Sayfa kaynakları yüklenmeye başlar başlamaz JS'i enjekte ediyoruz
-                    args.Frame.ExecuteJavaScriptAsync(hideWebdriverScript);
+                    args.Frame.ExecuteJavaScriptAsync(stealthScript);
                 }
             };
 
@@ -788,319 +824,341 @@ namespace Arac_Kiralama
         {
 
         }
+        // ⏱️ Genel Koşul Bekleyici (Şart sağlandığı an true döner, beklemez)
+        private static async Task<bool> WaitUntilAsync(
+            Func<Task<bool>> condition,
+            TimeSpan timeout,
+            TimeSpan? pollInterval = null)
+        {
+            TimeSpan interval = pollInterval ?? TimeSpan.FromMilliseconds(50);
+            DateTime bitisZamani = DateTime.Now.Add(timeout);
+
+            while (DateTime.Now < bitisZamani)
+            {
+                try
+                {
+                    if (await condition())
+                        return true;
+                }
+                catch { }
+
+                await Task.Delay(interval);
+            }
+
+            return false;
+        }
+
+        // 🎯 Sayfada CSS Elemanı Gelene Kadar Bekleyen Yardımcı Fonksiyon
+        private async Task<bool> WaitForElementAsync(string cssSelector, TimeSpan timeout, TimeSpan? pollInterval = null)
+        {
+            return await WaitUntilAsync(async () =>
+            {
+                if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
+                {
+                    string js = $@"
+                        (function() {{
+                            let el = document.querySelector('{cssSelector.Replace("'", "\\'")}');
+                            return el != null && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0);
+                        }})();
+                    ";
+                    var res = await chromiumWebBrowser.EvaluateScriptAsync(js);
+                    return res.Success && res.Result != null && Convert.ToBoolean(res.Result);
+                }
+                return false;
+            }, timeout, pollInterval);
+        }
+
         private async Task<bool> alisyeri(string nereden)
         {
             if (string.IsNullOrEmpty(nereden)) return false;
 
+            // 🇹🇷 Türkçe Kurallarına Göre Baş Harfi Otomatik Büyüt (örn: 'düzce' -> 'Düzce', 'istanbul' -> 'İstanbul')
+            var trKultur = System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
+            string duzenliNereden = trKultur.TextInfo.ToTitleCase(nereden.Trim().ToLower(trKultur));
+
             if (chromiumWebBrowser != null && chromiumWebBrowser.IsBrowserInitialized)
             {
-                // 1. Alış Yeri kutusuna (#inputPickUpLocation) tıkla
-                bool kutuBulundu = await ElemanaGercekTiklamaYap("#inputPickUpLocation");
-                if (!kutuBulundu) return false;
+                // 1. Kutunun hazır olmasını bekle 🎯
+                bool kutuHazir = await WaitForElementAsync("#inputPickUpLocation, input[placeholder*='Alış'], input[placeholder*='Nereden']", TimeSpan.FromSeconds(5));
+                if (!kutuHazir) return false;
 
-                await Task.Delay(200);
-
-                // 2. KUTUYU TEMİZLE -> HARF HARF KLAVYE OLAYLARI İLE YAZ (React Arama Tetikleyici) ⌨️
+                // 2. Dispatch ile Kutuyu Temizle ve Harf Harf Yaz ⌨️
                 string klavyeYazJs = $@"
                     (async function() {{
-                        let input = document.querySelector('#inputPickUpLocation');
+                        const bekle = (ms) => new Promise(r => setTimeout(r, ms));
+                        let input = document.querySelector('#inputPickUpLocation') || 
+                                    document.querySelector('input[placeholder*=""Alış""]') ||
+                                    document.querySelector('input[placeholder*=""Nereden""]');
                         if (!input) return false;
 
+                        // Varsa (X) temizleme butonunu tıkla
+                        let clearBtn = input.parentElement?.querySelector('button, svg, [class*=""clear""], [class*=""close""]');
+                        if (clearBtn) {{
+                            clearBtn.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true }}));
+                        }}
+
                         input.focus();
-                        input.click();
+                        input.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true }}));
+                        input.select();
+                        await bekle(30);
 
-                        // 1. Temizle
-                        let tracker = input._valueTracker;
-                        if (tracker) tracker.setValue('');
+                        // 🧹 1. Kutuyu Boşalt ve Input/Change Event'leri Dispatch Et
+                        let nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                        if (nativeSetter) nativeSetter.call(input, '');
                         input.value = '';
-                        input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        let trk = input._valueTracker;
+                        if (trk) trk.setValue('');
+                        input.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }}));
+                        input.dispatchEvent(new Event('change', {{ bubbles: true, composed: true }}));
+                        await bekle(60);
 
-                        // 2. Harf harf klavye basma olayları ile yaz (React search API'yi tetikler)
-                        let metin = '{nereden.Replace("'", "\\'")}';
+                        // ✍️ 2. Baş Harfi Düzeltilmiş Şehri Harf Harf Yaz (örn: 'Düzce')
+                        let metin = '{duzenliNereden.Replace("'", "\\'")}';
                         let val = '';
 
                         for (let char of metin) {{
                             val += char;
-                            let trackerLoop = input._valueTracker;
-                            if (trackerLoop) trackerLoop.setValue(val);
+                            if (nativeSetter) nativeSetter.call(input, val);
                             input.value = val;
+                            if (input._valueTracker) input._valueTracker.setValue(val);
+
+                            let keyProps = {{ key: char, code: 'Key' + char.toUpperCase(), charCode: char.charCodeAt(0), keyCode: char.charCodeAt(0), which: char.charCodeAt(0), bubbles: true, cancelable: true, composed: true }};
                             
-                            let keyEvt = {{ key: char, char: char, keyCode: char.charCodeAt(0), bubbles: true, cancelable: true }};
-                            input.dispatchEvent(new KeyboardEvent('keydown', keyEvt));
-                            input.dispatchEvent(new KeyboardEvent('keypress', keyEvt));
-                            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            input.dispatchEvent(new KeyboardEvent('keyup', keyEvt));
-                            await new Promise(r => setTimeout(r, 60));
+                            input.dispatchEvent(new KeyboardEvent('keydown', keyProps));
+                            input.dispatchEvent(new KeyboardEvent('keypress', keyProps));
+                            input.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }}));
+                            input.dispatchEvent(new KeyboardEvent('keyup', keyProps));
+                            await bekle(35);
                         }}
 
-                        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        input.dispatchEvent(new Event('change', {{ bubbles: true, composed: true }}));
                         return true;
                     }})();
                 ";
 
                 await chromiumWebBrowser.EvaluateScriptAsync(klavyeYazJs);
 
-                // Öneri listesinin ekranda yenilenmesi için bekle
-                await Task.Delay(800);
-
-                // 3. YENİ GELEN ŞEHİR SONUÇLARINI SEÇ 🎯
+                // 3. Açılan Listede Yeni Sonuçların Gelmesini Bekle ve Şehri Seç 🎯
                 string akilliSecimJs = $@"
                     (async function() {{
-                        function bekle(ms) {{ return new Promise(r => setTimeout(r, ms)); }}
+                        const bekle = (ms) => new Promise(r => setTimeout(r, ms));
 
-                        function gercekTikla(el) {{
-                            if (!el) return;
-                            el.focus();
-                            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {{
-                                el.dispatchEvent(new MouseEvent(evtType, {{ bubbles: true, cancelable: true, view: window }}));
-                            }});
-                            try {{ el.click(); }} catch(e) {{}}
+                        function normalize(str) {{
+                            return (str || '')
+                                .toLocaleLowerCase('tr-TR')
+                                .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
+                                .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c')
+                                .trim();
                         }}
 
-                        let hedefMetin = '{nereden.Replace("'", "\\'")}'.trim().toLocaleLowerCase('tr-TR');
+                        let hedef = normalize('{duzenliNereden.Replace("'", "\\'")}');
+                        let retries = 40;
+                        let secilecek = null;
 
-                        // Yeni şehir sonuçları ekrana düşene kadar bekle
-                        let retries = 20;
-                        let items = [];
                         while (retries-- > 0) {{
-                            items = Array.from(document.querySelectorAll('.location-item'));
-                            if (items.length === 0) {{
-                                items = Array.from(document.querySelectorAll('.search-autocomplete > div'));
+                            let items = Array.from(document.querySelectorAll('.location-item, div[class*=""location-item""]'));
+                            
+                            // 🛡️ Sadece yeni aranan şehre ait gelen güncel sonuçları filtrele
+                            let guncelSonuclar = items.filter(el => {{
+                                let t = normalize(el.innerText || '');
+                                return t.includes(hedef);
+                            }});
+
+                            if (guncelSonuclar.length > 0) {{
+                                // 🎯 1. ÖNCELİK: Birebir Şehir Eşleşmesi (Havalimanı/Gar hariç, Merkez/Türkiye dahil)
+                                secilecek = guncelSonuclar.find(el => {{
+                                    let titleEl = el.querySelector('div.flex.flex-row > div:first-child') || el.querySelector('div > div') || el;
+                                    let t = normalize(titleEl.innerText || el.innerText || '');
+                                    let tTemiz = t.replace(/,?\s*turkiye$/i, '').replace(/\s*merkez$/i, '').replace(/\s*sehir$/i, '').trim();
+                                    return tTemiz === hedef;
+                                }});
+
+                                // 🎯 2. ÖNCELİK: Havalimanı/Gar OLMAYAN ilk ana şehir kaydı
+                                if (!secilecek) {{
+                                    secilecek = guncelSonuclar.find(el => {{
+                                        let titleEl = el.querySelector('div.flex.flex-row > div:first-child') || el.querySelector('div > div') || el;
+                                        let t = normalize(titleEl.innerText || el.innerText || '');
+                                        let poiDegil = !t.includes('havaliman') && !t.includes('havaalan') && !t.includes('gar') && !t.includes('terminal') && !t.includes('otogar');
+                                        return poiDegil;
+                                    }});
+                                }}
+
+                                if (secilecek) break;
                             }}
 
-                            let buldu = items.some(el => el.innerText.trim().toLocaleLowerCase('tr-TR').includes(hedefMetin));
-                            if (buldu) break;
-
-                            await bekle(150);
+                            await bekle(50);
                         }}
 
-                        if (items.length === 0) return false;
-
-                        // 1. Adım: Tam Eşleşme (Sadece Ana Başlık)
-                        let tamEslesen = items.find(el => {{
-                            let anaBaslik = (el.querySelector('.font-bold')?.innerText || el.innerText.split('\n')[0]).trim().toLocaleLowerCase('tr-TR');
-                            return anaBaslik === hedefMetin;
-                        }});
-
-                        if (tamEslesen) {{
-                            gercekTikla(tamEslesen);
+                        if (secilecek) {{
+                            secilecek.scrollIntoView?.({{ block: 'nearest' }});
+                            secilecek.focus?.();
+                            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {{
+                                secilecek.dispatchEvent(new MouseEvent(evt, {{ bubbles: true, cancelable: true, view: window }}));
+                            }});
+                            try {{ secilecek.click(); }} catch(e) {{}}
                             return true;
                         }}
-
-                        // 2. Adım: Başlayan veya İçinde Geçen Eşleşme
-                        let icerenEslesen = items.find(el => {{
-                            let anaBaslik = (el.querySelector('.font-bold')?.innerText || el.innerText.split('\n')[0]).trim().toLocaleLowerCase('tr-TR');
-                            return anaBaslik.startsWith(hedefMetin) || anaBaslik.includes(hedefMetin);
-                        }});
-
-                        if (icerenEslesen) {{
-                            gercekTikla(icerenEslesen);
-                            return true;
-                        }}
-
-                        // 3. Adım: Yüklenen İlk Seçenek
-                        gercekTikla(items[0]);
-                        return true;
+                        return false;
                     }})();
                 ";
 
                 var res = await chromiumWebBrowser.EvaluateScriptAsync(akilliSecimJs);
-                bool tiklandi = res.Success && res.Result != null && Convert.ToBoolean(res.Result);
-
-                return true;
+                return res.Success && res.Result != null && Convert.ToBoolean(res.Result);
             }
             return false;
         }
 
-        private async Task TarihAraligiSec(DateTime alisTarihi, DateTime donusTarihi)
+        private async Task<bool> TarihAraligiSec(DateTime alisTarihi, DateTime donusTarihi)
         {
-            string alisAy = alisTarihi.ToString("MMMM", new System.Globalization.CultureInfo("tr-TR")).ToLower();
-            string donusAy = donusTarihi.ToString("MMMM", new System.Globalization.CultureInfo("tr-TR")).ToLower();
-            string baslangicGunu = alisTarihi.Day.ToString();
-            string bitisGunu = donusTarihi.Day.ToString();
+            string alisTarihStr = alisTarihi.ToString("yyyy-MM-dd");
+            string donusTarihStr = donusTarihi.ToString("yyyy-MM-dd");
 
             string jsScript = $@"
         (async function() {{
-            const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            const bekle = (ms) => new Promise(r => setTimeout(r, ms));
 
-            function safeClick(el) {{
-                if (!el) return;
-                el.focus?.();
-                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {{
-                    el.dispatchEvent(new MouseEvent(type, {{ bubbles: true, cancelable: true, view: window }}));
-                }});
-                try {{ el.click(); }} catch(e) {{}}
+            // 1. Takvim Kutusunu Aç 📅
+            let acilacakKutu = document.querySelector('div[modaltitlecmskey=""pickup_and_dropoff_date""] [class*=""cursor-pointer""]') ||
+                               document.querySelector('div[modaltitlecmskey=""pickup_and_dropoff_date""]') ||
+                               document.querySelector('div[modaltitle*=""Alış ve Bırakış""] [class*=""cursor-pointer""]');
+
+            if (acilacakKutu && !document.querySelector('.cal-months')) {{
+                acilacakKutu.click();
             }}
 
-            // 1. Takvimi Aç 📅
-            let takvimKutusu = document.querySelector('.dp__main') || document.querySelector('div[class*=""dp__main""]');
-            if (takvimKutusu) {{
-                safeClick(takvimKutusu);
-                await bekle(600);
+            let r1 = 30;
+            while (r1-- > 0) {{
+                if (document.querySelector('.cal-months')) break;
+                if (r1 === 15 && acilacakKutu) acilacakKutu.click();
+                await bekle(25);
             }}
 
-            // Görünür ayları oku (Sol ve Sağ takvim)
-            function getGorunurAylar() {{
-                let monthBtns = Array.from(document.querySelectorAll('button[aria-label=""Open months overlay""], .dp__month_year_select'));
-                return monthBtns.map(b => (b.innerText || b.textContent || '').trim().toLowerCase());
-            }}
+            if (!document.querySelector('.cal-months')) return false;
 
-            // 2. Alış ayına ilerle ➡️
-            let hedefAlisAy = '{alisAy}'.toLowerCase();
+            // 2. Alış Tarihini Seç (SADECE 1 KEZ SAF td.click()) 🎯
+            let hedefAlis = '{alisTarihStr}';
             let maxTur1 = 12;
+            let alisSecildi = false;
+
             while (maxTur1-- > 0) {{
-                let gorunurAylar = getGorunurAylar();
-                if (gorunurAylar.some(ay => ay.includes(hedefAlisAy))) break;
-
-                let nextBtns = Array.from(document.querySelectorAll('button[aria-label=""Next month""], .dp__month_year_col_nav'));
-                let nextBtn = nextBtns[nextBtns.length - 1] || nextBtns[0];
-                if (nextBtn) {{
-                    safeClick(nextBtn);
-                    await bekle(400);
-                }} else break;
-            }}
-
-            // 3. Gün Bulma Fonksiyonu
-            function gunSec(gunStr, ayStr) {{
-                let hedefSayi = parseInt(gunStr);
-                let calendars = Array.from(document.querySelectorAll('.dp__instance_calendar'));
-                
-                for (let cal of calendars) {{
-                    let calAy = (cal.querySelector('button[aria-label=""Open months overlay""]')?.innerText || '').toLowerCase();
-                    if (!ayStr || calAy.includes(ayStr)) {{
-                        let cells = Array.from(cal.querySelectorAll('.dp__cell_inner, .dp__calendar_item, [class*=""cell""]')).filter(el => {{
-                            let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('dp__cell_disabled') || el.classList.contains('disabled');
-                            let txt = (el.innerText || el.textContent || '').trim();
-                            return !pasif && (txt === gunStr || parseInt(txt) === hedefSayi);
-                        }});
-                        if (cells.length > 0) return cells[0];
-                    }}
+                let elBaslangic = document.querySelector(`td[data-day=""${{hedefAlis}}""]`);
+                if (elBaslangic && !elBaslangic.classList.contains('disabled')) {{
+                    elBaslangic.click();
+                    alisSecildi = true;
+                    break;
                 }}
 
-                let allCells = Array.from(document.querySelectorAll('.dp__cell_inner, .dp__calendar_item, [class*=""cell""]')).filter(el => {{
-                    let pasif = el.classList.contains('dp__outer_month') || el.classList.contains('dp__cell_disabled') || el.classList.contains('disabled');
-                    let txt = (el.innerText || el.textContent || '').trim();
-                    return !pasif && (txt === gunStr || parseInt(txt) === hedefSayi);
-                }});
-                return allCells[0] || null;
-            }}
-
-            // 4. Alış Gününü Seç 🎯
-            let elBaslangic = gunSec('{baslangicGunu}', hedefAlisAy);
-            if (elBaslangic) {{
-                safeClick(elBaslangic);
-            }}
-            await bekle(800);
-
-            // 5. Veriş ayına ilerle ➡️
-            let hedefDonusAy = '{donusAy}'.toLowerCase();
-            let maxTur2 = 12;
-            while (maxTur2-- > 0) {{
-                let gorunurAylar = getGorunurAylar();
-                if (gorunurAylar.some(ay => ay.includes(hedefDonusAy))) break;
-
-                let nextBtns = Array.from(document.querySelectorAll('button[aria-label=""Next month""], .dp__month_year_col_nav'));
-                let nextBtn = nextBtns[nextBtns.length - 1] || nextBtns[0];
-                if (nextBtn) {{
-                    safeClick(nextBtn);
-                    await bekle(400);
+                let nextBtn = document.querySelector('button.cal-nav.right-4') || document.querySelector('button[class*=""cal-nav""][class*=""right""]');
+                if (nextBtn && !nextBtn.disabled) {{
+                    nextBtn.click();
+                    await bekle(60);
                 }} else break;
             }}
 
-            // 6. Veriş Gününü Seç 🎯
-            let elBitis = gunSec('{bitisGunu}', hedefDonusAy);
-            if (elBitis) {{
-                safeClick(elBitis);
-            }}
-            await bekle(600);
+            if (!alisSecildi) return false;
 
-            // 7. Seçilen Tarihleri Onayla 🎯
-            let secUygulaBtn = document.querySelector('.dp__action_select') || 
-                               document.querySelector('.dp__select') || 
-                               document.querySelector('button[class*=""select""]') || 
+            // 1. Günün seçilip durumun geçmesi için 200ms bekle
+            await bekle(200);
+
+            // 3. Bırakış Tarihini Seç (SADECE 1 KEZ SAF td.click()) 🎯
+            let hedefDonus = '{donusTarihStr}';
+            let maxTur2 = 12;
+            let donusSecildi = false;
+
+            while (maxTur2-- > 0) {{
+                let elBitis = document.querySelector(`td[data-day=""${{hedefDonus}}""]`);
+                if (elBitis && !elBitis.classList.contains('disabled')) {{
+                    elBitis.click();
+                    donusSecildi = true;
+                    break;
+                }}
+
+                let nextBtn = document.querySelector('button.cal-nav.right-4') || document.querySelector('button[class*=""cal-nav""][class*=""right""]');
+                if (nextBtn && !nextBtn.disabled) {{
+                    nextBtn.click();
+                    await bekle(60);
+                }} else break;
+            }}
+
+            if (!donusSecildi) return false;
+
+            // 4. Varsa Seç/Uygula Butonuna Tıkla
+            await bekle(100);
+            let secUygulaBtn = document.querySelector('button[class*=""select""]') || 
+                               document.querySelector('button[class*=""apply""]') || 
                                Array.from(document.querySelectorAll('button')).find(b => b.innerText && (b.innerText.toLowerCase().includes('seç') || b.innerText.toLowerCase().includes('uygula')));
 
             if (secUygulaBtn) {{
-                safeClick(secUygulaBtn);
-            }} else {{
-                document.body.click();
+                secUygulaBtn.click();
             }}
+
+            return true;
         }})();
     ";
 
-            if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
-            {
-                await chromiumWebBrowser.EvaluateScriptAsync(jsScript);
-            }
-        }
+    if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
+    {
+        var res = await chromiumWebBrowser.EvaluateScriptAsync(jsScript);
+        return res.Success && res.Result != null && Convert.ToBoolean(res.Result);
+    }
+    return false;
+}
 
-        private async Task SaatleriSec(string alisSaati, string donusSaati)
+        private async Task<bool> SaatleriSec(string alisSaati, string donusSaati)
         {
-            // 1. ADIM: ALIŞ SAATİ SEÇİMİ (1. Kutu)
-            string jsAlisSaat = $@"
+            if (string.IsNullOrEmpty(alisSaati) || string.IsNullOrEmpty(donusSaati)) return false;
+
+            string jsSaatSecim = $@"
                 (async function() {{
                     const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-                    let saatKutulari = Array.from(document.querySelectorAll('div[class=""flex items-center gap-2 h-full w-full min-w-0""]'));
-                    if (saatKutulari.length === 0) {{
-                        saatKutulari = Array.from(document.querySelectorAll('div[class*=""min-w-0""]'));
-                    }}
-
-                    if (saatKutulari.length > 0) {{
-                        // 1. Kutu (Alış Saati)
-                        saatKutulari[0].focus();
-                        saatKutulari[0].click();
-                        await bekle(400);
-
-                        let saatLiListesi = Array.from(document.querySelectorAll('.hour-li'));
-                        let hedef = saatLiListesi.find(li => li.innerText.trim() === '{alisSaati}');
-                        if (hedef) {{
-                            hedef.focus();
-                            hedef.click();
+                    async function saatAyarla(index, hedefSaat) {{
+                        // v2 flex kutu seçicisi
+                        let saatKutulari = Array.from(document.querySelectorAll('div[class=""flex items-center gap-2 h-full w-full min-w-0""]'));
+                        if (saatKutulari.length === 0) {{
+                            saatKutulari = Array.from(document.querySelectorAll('div[class*=""min-w-0""]'));
                         }}
+
+                        if (saatKutulari.length > index) {{
+                            let kutu = saatKutulari[index];
+                            kutu.focus();
+                            kutu.click();
+
+                            // Dinamik: 700ms beklemek yerine .hour-li açıldığı an (25ms aralıkla) tıklar
+                            let retries = 25;
+                            while (retries-- > 0) {{
+                                let saatLiListesi = Array.from(document.querySelectorAll('.hour-li'));
+                                let hedef = saatLiListesi.find(li => li.innerText.trim() === hedefSaat);
+                                if (hedef) {{
+                                    hedef.scrollIntoView?.({{ block: 'nearest' }});
+                                    hedef.focus();
+                                    hedef.click();
+                                    return true;
+                                }}
+                                await bekle(25);
+                            }}
+                        }}
+                        return false;
                     }}
+
+                    // 1. Alış Saati
+                    let ok1 = await saatAyarla(0, '{alisSaati}');
+                    if (!ok1) return false;
+
+                    await bekle(60);
+
+                    // 2. Bırakış Saati
+                    let ok2 = await saatAyarla(1, '{donusSaati}');
+                    return ok2;
                 }})();
             ";
 
             if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
             {
-                await chromiumWebBrowser.EvaluateScriptAsync(jsAlisSaat);
+                var res = await chromiumWebBrowser.EvaluateScriptAsync(jsSaatSecim);
+                return res.Success && res.Result != null && Convert.ToBoolean(res.Result);
             }
-
-            // 🛑 ALIŞ SAATİ BİTTİKTEN SONRA BEKLEME (700ms)
-            await Task.Delay(700);
-
-            // 2. ADIM: BIRAKIŞ (DÖNÜŞ) SAATİ SEÇİMİ (2. Kutu)
-            string jsDonusSaat = $@"
-                (async function() {{
-                    const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-                    // Güncel DOM'dan saat kutularını oku
-                    let saatKutulari = Array.from(document.querySelectorAll('div[class=""flex items-center gap-2 h-full w-full min-w-0""]'));
-                    if (saatKutulari.length === 0) {{
-                        saatKutulari = Array.from(document.querySelectorAll('div[class*=""min-w-0""]'));
-                    }}
-
-                    if (saatKutulari.length > 1) {{
-                        // 2. Kutu (Bırakış/Dönüş Saati)
-                        saatKutulari[1].focus();
-                        saatKutulari[1].click();
-                        await bekle(500);
-
-                        let saatLiListesi = Array.from(document.querySelectorAll('.hour-li'));
-                        let hedef = saatLiListesi.find(li => li.innerText.trim() === '{donusSaati}');
-                        if (hedef) {{
-                            hedef.focus();
-                            hedef.click();
-                        }}
-                    }}
-                }})();
-            ";
-
-            if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
-            {
-                await chromiumWebBrowser.EvaluateScriptAsync(jsDonusSaat);
-            }
+            return false;
         }
 
         private async Task<bool> ElemanGelenekadarBekle(string elementId, int timeoutSaniye = 15)
@@ -1324,30 +1382,40 @@ namespace Arac_Kiralama
 
                 // 🛑 EKRANDAKİ KAMPANYA POPUP'INI OTOMATİK KAPAT 🚪
                 await PopupKapat();
-                await Task.Delay(400);
 
                 // 1. Alış Yerini Seç
                 bool alisBasarili = await alisyeri(neredenMetin);
-
-                if (alisBasarili)
+                if (!alisBasarili)
                 {
-                    await Task.Delay(500);
-                    // 2. Tarihleri Seç
-                    await TarihAraligiSec(alisTar, verisTar);
-
-                    await Task.Delay(500);
-                    // 3. Saatleri Seç (Sırayla Alış ve Veriş)
-                    await SaatleriSec(alisSaat, donusSaat);
-
-                    await Task.Delay(500);
-                    // 4. Aramayı Başlat (#search butonuna tıkla)
-                    await ElemanaGercekTiklamaYap("#search");
-
-                    // 5. Araç Listesinin Yüklenmesini Bekle Ve Filtreleri Uygula 🚗⛽
-                    await Task.Delay(3500);
-                    await FiltreleriUygula(vitesSecimi, yakitSecimi);
-                    await AraclariVeriTablosunaAktar();
+                    MessageBox.Show($"'{neredenMetin}' lokasyonu Yolcu360'ta bulunamadı veya seçilemedi!\nİşlem durduruldu.", "1. Adım Başarısız ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
+
+                // 2. Tarihleri Seç (Dinamik State Kontrollü)
+                bool tarihBasarili = await TarihAraligiSec(alisTar, verisTar);
+                if (!tarihBasarili)
+                {
+                    MessageBox.Show("Tarih aralığı takvimden seçilemedi!\nİşlem durduruldu.", "2. Adım Başarısız ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 3. Saatleri Seç (Dinamik)
+                bool saatBasarili = await SaatleriSec(alisSaat, donusSaat);
+                if (!saatBasarili)
+                {
+                    MessageBox.Show("Saatler seçilemedi!\nİşlem durduruldu.", "3. Adım Başarısız ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 4. Aramayı Başlat (#search butonuna tıkla)
+                await ElemanaGercekTiklamaYap("#search");
+
+                // 5. Araç Listesinin Yüklenmesini DİNAMİK BEKLE (Task.Delay 3500ms yerine!) 🚗⚡
+                await WaitForElementAsync(".car-card, div[class*='car-card'], [id*='car_']", TimeSpan.FromSeconds(15));
+
+                // 6. Filtreleri Uygula Ve Araçları Aktar
+                await FiltreleriUygula(vitesSecimi, yakitSecimi);
+                await AraclariVeriTablosunaAktar();
             }
         }
 
