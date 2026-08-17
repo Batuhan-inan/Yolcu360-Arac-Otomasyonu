@@ -1234,127 +1234,99 @@ namespace Arac_Kiralama
             vitesTuru = (vitesTuru ?? "").Trim();
             yakitTuru = (yakitTuru ?? "").Trim();
 
-            // 🛑 1. ADIM: Ekranda Filtre Paneli / "Vites Tipi" Belirene Kadar Bekle
-            bool panelYuklendi = false;
-            for (int i = 0; i < 30; i++)
-            {
-                if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
-                {
-                    var testRes = await chromiumWebBrowser.EvaluateScriptAsync(
-                        "Array.from(document.querySelectorAll('div, span, p')).some(el => (el.innerText || '').trim().includes('Vites Tipi'));"
-                    );
-                    if (testRes.Success && testRes.Result is bool hazir && hazir)
-                    {
-                        panelYuklendi = true;
-                        break;
-                    }
-                }
-                await Task.Delay(500);
-            }
+            if ((string.IsNullOrEmpty(vitesTuru) || vitesTuru == "Tümü") && 
+                (string.IsNullOrEmpty(yakitTuru) || yakitTuru == "Tümü")) 
+                return;
 
-            if (!panelYuklendi) return;
-            await Task.Delay(1000);
+            // 🛑 1. ADIM: Arama Sonuç Sayfasındaki Sol Filtre Panelinin Gelmesini Dinamik Bekle ⚡
+            bool panelHazir = await WaitForElementAsync("#stickyFilterCard, [id*='stickyFilter'], details[data-cms-key*='filter']", TimeSpan.FromSeconds(15));
+            if (!panelHazir) return;
 
-            // 🛑 2. ADIM: Tekli Tıklama Ve Akıllı Akordeon Mantığı İle Filtrele
+            // 🛑 2. ADIM: <details> ve <label> Etiketlerine Tam Tıklama Gönder
             string jsScript = $@"
         (async function() {{
             const bekle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            // Temiz Ve Tekli Tıklama Fonksiyonu ⚡
-            function temizTikla(el) {{
+            function safeClick(el) {{
                 if (!el) return;
-                try {{
-                    if (typeof el.click === 'function') {{
-                        el.click();
-                    }} else {{
-                        el.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }}));
-                    }}
-                }} catch(e) {{}}
-            }}
-
-            // Akordeon Başlığı Tıklama
-            async function akordeonAc(baslikMetni) {{
-                let tumu = Array.from(document.querySelectorAll('div, span, p'));
-                let hedef = tumu.find(el => {{
-                    let txt = (el.innerText || el.textContent || '').trim();
-                    return el.offsetWidth > 0 && el.offsetHeight > 0 && txt === baslikMetni;
+                el.scrollIntoView?.({{ block: 'center' }});
+                el.focus?.();
+                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(t => {{
+                    el.dispatchEvent(new MouseEvent(t, {{ bubbles: true, cancelable: true, view: window }}));
                 }});
+                try {{ el.click(); }} catch(e) {{}}
+            }}
 
-                if (!hedef) {{
-                    hedef = tumu.find(el => {{
-                        let txt = (el.innerText || el.textContent || '').trim();
-                        return el.offsetWidth > 0 && el.offsetHeight > 0 && txt.includes(baslikMetni);
-                    }});
-                }}
-
-                if (hedef) {{
-                    let tiklanacak = hedef.closest('div[class*=""cursor-pointer""]') || hedef.closest('div[class*=""flex""]') || hedef.parentElement || hedef;
-                    tiklanacak.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                    await bekle(400);
-                    temizTikla(tiklanacak);
-                    await bekle(1000);
+            async function akordeonGarantiAc(cmsKey) {{
+                let details = document.querySelector(`details[data-cms-key=""${{cmsKey}}""]`);
+                if (details && !details.open) {{
+                    let summary = details.querySelector('summary') || details;
+                    safeClick(summary);
+                    await bekle(250);
                 }}
             }}
 
-            // Kutucuk Bul Ve Seç (Zaten Görünürse Akordeona Dokunmaz!)
-            async function kutucuguBulVeSec(inputId, baslikMetni) {{
-                let input = document.getElementById(inputId) || document.querySelector(`input[id*=""${{inputId}}""]`);
+            async function filtreSec(filterName, cmsKey) {{
+                await akordeonGarantiAc(cmsKey);
+                await bekle(150);
 
-                // Kutucuk yoksa veya görünür değilse (akordeon kapalıysa) başlığa tıkla ve aç
-                if (!input || input.offsetWidth === 0 || input.offsetHeight === 0) {{
-                    await akordeonAc(baslikMetni);
-                    await bekle(500);
-                    input = document.getElementById(inputId) || document.querySelector(`input[id*=""${{inputId}}""]`);
+                let label = document.querySelector(`label[name=""${{filterName}}""]`) || 
+                            document.querySelector(`label[for=""${{filterName}}""]`) ||
+                            document.getElementById(filterName)?.closest('label');
+
+                let input = document.getElementById(filterName) || document.querySelector(`input[id=""${{filterName}}""]`);
+
+                if (label) {{
+                    safeClick(label);
+                    await bekle(200);
+                }} else if (input) {{
+                    safeClick(input);
+                    await bekle(200);
                 }}
 
-                // Kutucuk seçili değilse tıkla
                 if (input && !input.checked) {{
-                    temizTikla(input);
-                    await bekle(500);
-                    if (!input.checked && input.parentElement) {{
-                        temizTikla(input.parentElement);
-                    }}
-                    await bekle(800);
+                    input.checked = true;
+                    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
                 }}
             }}
 
-            // -----------------------------------------------------
             // ⚙️ 1. VİTES FİLTRESİ 🚗
-            // -----------------------------------------------------
             if ('{vitesTuru}' === 'Manuel') {{
-                await kutucuguBulVeSec('filter-transmission.1', 'Vites Tipi');
+                await filtreSec('filter-transmission.1', 'filter_transmission');
             }}
             else if ('{vitesTuru}' === 'Otomatik') {{
-                await kutucuguBulVeSec('filter-transmission.2', 'Vites Tipi');
+                await filtreSec('filter-transmission.2', 'filter_transmission');
             }}
 
-            await bekle(1000);
+            await bekle(300);
 
-            // -----------------------------------------------------
             // ⛽ 2. YAKIT FİLTRESİ ⛽
-            // -----------------------------------------------------
-            if ('{yakitTuru}' !== 'Tümü') {{
+            if ('{yakitTuru}' !== 'Tümü' && '{yakitTuru}' !== '') {{
                 if ('{yakitTuru}' === 'Benzin') {{
-                    await kutucuguBulVeSec('filter-fuel.1', 'Yakıt Tipi');
-                    await kutucuguBulVeSec('filter-fuel.8', 'Yakıt Tipi');
+                    await filtreSec('filter-fuel.1', 'filter_fuel');
+                    await filtreSec('filter-fuel.8', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Dizel') {{
-                    await kutucuguBulVeSec('filter-fuel.2', 'Yakıt Tipi');
-                    await kutucuguBulVeSec('filter-fuel.8', 'Yakıt Tipi');
+                    await filtreSec('filter-fuel.2', 'filter_fuel');
+                    await filtreSec('filter-fuel.8', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Hibrit') {{
-                    await kutucuguBulVeSec('filter-fuel.7', 'Yakıt Tipi');
+                    await filtreSec('filter-fuel.7', 'filter_fuel');
                 }}
                 else if ('{yakitTuru}' === 'Elektrik') {{
-                    await kutucuguBulVeSec('filter-fuel.11', 'Yakıt Tipi');
+                    await filtreSec('filter-fuel.11', 'filter_fuel');
                 }}
             }}
+
+            return true;
         }})();
     ";
 
             if (chromiumWebBrowser != null && chromiumWebBrowser.CanExecuteJavascriptInMainFrame)
             {
                 await chromiumWebBrowser.EvaluateScriptAsync(jsScript);
+                await Task.Delay(2000);
             }
         }
 
@@ -1367,7 +1339,8 @@ namespace Arac_Kiralama
                 return;
             }
 
-            bool bulundu = await ElemanGelenekadarBekle("inputPickUpLocation", 15);
+            // 1. Arama kutusunun hazır olmasını dinamik bekle 🎯
+            bool bulundu = await WaitForElementAsync("#inputPickUpLocation", TimeSpan.FromSeconds(15));
 
             if (bulundu)
             {
@@ -1438,6 +1411,8 @@ namespace Arac_Kiralama
             dgbVeriEkranı.ScrollBars = ScrollBars.Both;
 
             // Görsel Hizalamalar
+            dgbVeriEkranı.Columns["Model"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
+            dgbVeriEkranı.Columns["Sirket"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             dgbVeriEkranı.Columns["Vites"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             dgbVeriEkranı.Columns["Yakit"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             dgbVeriEkranı.Columns["Fiyat"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
@@ -1445,7 +1420,10 @@ namespace Arac_Kiralama
 
         private void PopuleEt(System.Collections.IEnumerable list)
         {
-            dgbVeriEkranı_Hazirla();
+            if (dgbVeriEkranı.Columns.Count == 0)
+            {
+                dgbVeriEkranı_Hazirla();
+            }
             dgbVeriEkranı.Rows.Clear();
 
             foreach (var item in list)
@@ -1467,7 +1445,8 @@ namespace Arac_Kiralama
 
         private async Task AraclariVeriTablosunaAktar()
         {
-            await Task.Delay(1500); // Filtreleme sonrası araç listesinin tazelenmesini bekle
+            // 🛑 1. ADIM: Araç Fiyatlarının Ekrana Yüklenmesini Dinamik Bekle (Kör Task.Delay Yok!) 🚗⚡
+            await WaitForElementAsync("#car_total_price, .car-card, div[class*='car-card']", TimeSpan.FromSeconds(10));
 
             string jsScript = @"
                 (async function() {
@@ -1479,21 +1458,20 @@ namespace Arac_Kiralama
 
                     for (let i = 0; i < 20; i++) {
                         window.scrollTo(0, document.body.scrollHeight);
-                        await bekle(600);
+                        await bekle(300);
 
                         let suAnkiYukseklik = document.body.scrollHeight;
                         if (suAnkiYukseklik === sonYukseklik) {
                             ayniYukseklikSayaci++;
-                            if (ayniYukseklikSayaci >= 2) break; // Artık yeni araç yüklenmiyorsa dur
+                            if (ayniYukseklikSayaci >= 2) break;
                         } else {
                             ayniYukseklikSayaci = 0;
                             sonYukseklik = suAnkiYukseklik;
                         }
                     }
 
-                    // Sayfayı tekrar en üste getir
                     window.scrollTo(0, 0);
-                    await bekle(300);
+                    await bekle(150);
 
                     // 🎯 2. Yüklenen Tüm Araç Kartlarını Eksiksiz Çek
                     let priceElements = Array.from(document.querySelectorAll('#car_total_price'));
