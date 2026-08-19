@@ -240,6 +240,154 @@ namespace Arac_Kiralama
             this.panel.Width = this.ClientSize.Width - this.panel.Left - 15;
             this.panel.Height = this.ClientSize.Height - this.panel.Top - 15;
             this.panel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+            ModernKoyuTemaUygula();
+        }
+
+        private void ModernKoyuTemaUygula()
+        {
+            // 1. Form Genel Renk ve Font Ayarı
+            this.BackColor = Color.FromArgb(24, 27, 32);
+            this.ForeColor = Color.FromArgb(241, 245, 249);
+            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+
+            // 2. Etiketler (Labels)
+            var tumLabeller = new Label[] { label1, label2, label3, label4, label5, label6, label7 };
+            foreach (var lbl in tumLabeller)
+            {
+                if (lbl != null)
+                {
+                    lbl.ForeColor = Color.FromArgb(203, 213, 225);
+                    lbl.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+                }
+            }
+
+            // 3. Giriş Kutuları (TextBox & ComboBox)
+            var tumTextBoxlar = new TextBox[] { tbAlısyeri, tbKoleksiyonAdi };
+            foreach (var tb in tumTextBoxlar)
+            {
+                if (tb != null)
+                {
+                    tb.BackColor = Color.FromArgb(38, 43, 55);
+                    tb.ForeColor = Color.White;
+                    tb.BorderStyle = BorderStyle.FixedSingle;
+                    tb.Font = new Font("Segoe UI", 10f);
+                }
+            }
+
+            var tumCombolar = new ComboBox[] { cbAlısSaati, cbDonusSaati, cbYakit, cbVites };
+            foreach (var cb in tumCombolar)
+            {
+                if (cb != null)
+                {
+                    cb.BackColor = Color.FromArgb(38, 43, 55);
+                    cb.ForeColor = Color.White;
+                    cb.FlatStyle = FlatStyle.Flat;
+                    cb.Font = new Font("Segoe UI", 9.5f);
+                }
+            }
+
+            // 4. DateTimePicker'lar
+            var tumDtpler = new DateTimePicker[] { dtpAlisTarihi, dtpVerisTarihi };
+            foreach (var dtp in tumDtpler)
+            {
+                if (dtp != null)
+                {
+                    dtp.Font = new Font("Segoe UI", 9.5f);
+                    dtp.CalendarMonthBackground = Color.FromArgb(38, 43, 55);
+                    dtp.CalendarForeColor = Color.White;
+                    dtp.CalendarTitleBackColor = Color.FromArgb(13, 110, 253);
+                    dtp.CalendarTitleForeColor = Color.White;
+                }
+            }
+
+            // 5. Butonlar (Modern Flat Stiller)
+            if (btnAra != null)
+            {
+                btnAra.FlatStyle = FlatStyle.Flat;
+                btnAra.FlatAppearance.BorderSize = 0;
+                btnAra.BackColor = Color.FromArgb(13, 110, 253);
+                btnAra.ForeColor = Color.White;
+                btnAra.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
+                btnAra.Cursor = Cursors.Hand;
+            }
+
+            if (btnKoleksiyonKaydet != null)
+            {
+                btnKoleksiyonKaydet.FlatStyle = FlatStyle.Flat;
+                btnKoleksiyonKaydet.FlatAppearance.BorderSize = 0;
+                btnKoleksiyonKaydet.BackColor = Color.FromArgb(16, 185, 129);
+                btnKoleksiyonKaydet.ForeColor = Color.White;
+                btnKoleksiyonKaydet.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+                btnKoleksiyonKaydet.Cursor = Cursors.Hand;
+            }
+
+            if (btnGecmisOdemeler != null)
+            {
+                btnGecmisOdemeler.FlatStyle = FlatStyle.Flat;
+                btnGecmisOdemeler.FlatAppearance.BorderSize = 0;
+                btnGecmisOdemeler.BackColor = Color.FromArgb(99, 102, 241);
+                btnGecmisOdemeler.ForeColor = Color.White;
+                btnGecmisOdemeler.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+                btnGecmisOdemeler.Cursor = Cursors.Hand;
+            }
+
+            if (btnGecmisKoleksiyonlar != null)
+            {
+                btnGecmisKoleksiyonlar.FlatStyle = FlatStyle.Flat;
+                btnGecmisKoleksiyonlar.FlatAppearance.BorderSize = 0;
+                btnGecmisKoleksiyonlar.BackColor = Color.FromArgb(51, 65, 85);
+                btnGecmisKoleksiyonlar.ForeColor = Color.FromArgb(241, 245, 249);
+                btnGecmisKoleksiyonlar.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+                btnGecmisKoleksiyonlar.Cursor = Cursors.Hand;
+            }
+
+            // 7. İstatistik & Dashboard Butonu
+            var btnDashboard = new Button();
+            btnDashboard.Text = "📈 İstatistik & Dashboard";
+            btnDashboard.Size = new Size(160, 32);
+            btnDashboard.Location = new Point(1185, 31);
+            btnDashboard.FlatStyle = FlatStyle.Flat;
+            btnDashboard.FlatAppearance.BorderSize = 0;
+            btnDashboard.BackColor = Color.FromArgb(245, 158, 11);
+            btnDashboard.ForeColor = Color.White;
+            btnDashboard.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            btnDashboard.Cursor = Cursors.Hand;
+            btnDashboard.Click += (s, e) =>
+            {
+                DashboardForm df = new DashboardForm();
+                df.ShowDialog();
+            };
+            this.Controls.Add(btnDashboard);
+
+            // 6. DataGridView (Modern Koyu Tablo Tasarımı)
+            if (dgbVeriEkranı != null)
+            {
+                dgbVeriEkranı.BackgroundColor = Color.FromArgb(24, 27, 32);
+                dgbVeriEkranı.BorderStyle = BorderStyle.None;
+                dgbVeriEkranı.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+                dgbVeriEkranı.GridColor = Color.FromArgb(51, 65, 85);
+                dgbVeriEkranı.EnableHeadersVisualStyles = false;
+                dgbVeriEkranı.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+                dgbVeriEkranı.ColumnHeadersHeight = 40;
+
+                dgbVeriEkranı.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(15, 23, 42);
+                dgbVeriEkranı.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(148, 163, 184);
+                dgbVeriEkranı.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+
+                dgbVeriEkranı.DefaultCellStyle.BackColor = Color.FromArgb(30, 34, 45);
+                dgbVeriEkranı.DefaultCellStyle.ForeColor = Color.FromArgb(248, 250, 252);
+                dgbVeriEkranı.DefaultCellStyle.Font = new Font("Segoe UI", 9.5f);
+                dgbVeriEkranı.DefaultCellStyle.SelectionBackColor = Color.FromArgb(37, 99, 235);
+                dgbVeriEkranı.DefaultCellStyle.SelectionForeColor = Color.White;
+
+                dgbVeriEkranı.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(38, 43, 55);
+                dgbVeriEkranı.AlternatingRowsDefaultCellStyle.ForeColor = Color.FromArgb(248, 250, 252);
+                dgbVeriEkranı.AlternatingRowsDefaultCellStyle.SelectionBackColor = Color.FromArgb(37, 99, 235);
+                dgbVeriEkranı.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+
+                dgbVeriEkranı.RowTemplate.Height = 34;
+            }
         }
 
         private void BaslatTarayici()
@@ -1373,6 +1521,30 @@ namespace Arac_Kiralama
             dgbVeriEkranı.Columns["Fiyat"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
         }
 
+        // 💱 Çoklu Para Birimi (USD ve EUR) Hesaplayıcı
+        private const double DolarKuru = 38.50;
+        private const double EuroKuru = 41.80;
+
+        private string FiyatDovizHesapla(string hamFiyat)
+        {
+            if (string.IsNullOrWhiteSpace(hamFiyat)) return "";
+
+            try
+            {
+                string temiz = Regex.Replace(hamFiyat, @"[^\d,.]", "").Replace(".", "").Replace(",", ".");
+                if (double.TryParse(temiz, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double tlFiyat) && tlFiyat > 0)
+                {
+                    double usdFiyat = tlFiyat / DolarKuru;
+                    double eurFiyat = tlFiyat / EuroKuru;
+
+                    return $"{tlFiyat:N0} ₺  (${usdFiyat:N0} / €{eurFiyat:N0})";
+                }
+            }
+            catch { }
+
+            return hamFiyat;
+        }
+
         private void PopuleEt(System.Collections.IEnumerable list)
         {
             if (dgbVeriEkranı.Columns.Count == 0)
@@ -1389,9 +1561,12 @@ namespace Arac_Kiralama
                     string sirket = dict.ContainsKey("sirket") ? dict["sirket"]?.ToString() : "";
                     string vites = dict.ContainsKey("vites") ? dict["vites"]?.ToString() : "";
                     string yakit = dict.ContainsKey("yakit") ? dict["yakit"]?.ToString() : "";
-                    string fiyat = dict.ContainsKey("fiyat") ? dict["fiyat"]?.ToString() : "";
+                    string hamFiyat = dict.ContainsKey("fiyat") ? dict["fiyat"]?.ToString() : "";
 
-                    dgbVeriEkranı.Rows.Add(model, sirket, vites, yakit, fiyat);
+                    // 💱 Çoklu Para Birimi Dönüşümü
+                    string fiyatCoklu = FiyatDovizHesapla(hamFiyat);
+
+                    dgbVeriEkranı.Rows.Add(model, sirket, vites, yakit, fiyatCoklu);
                 }
             }
 

@@ -2,7 +2,10 @@ using Dapper;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -10,6 +13,8 @@ namespace Arac_Kiralama
 {
     public partial class GecmisIslemlerForm : Form
     {
+        private Button btnFaturaOlustur;
+
         public GecmisIslemlerForm(int varsayilanSekme = 0)
         {
             InitializeComponent();
@@ -17,6 +22,135 @@ namespace Arac_Kiralama
             if (varsayilanSekme >= 0 && varsayilanSekme < tabControlGecmis.TabPages.Count)
             {
                 tabControlGecmis.SelectedIndex = varsayilanSekme;
+            }
+
+            ModernKoyuTemaUygula();
+            FaturaButonunuEkle();
+        }
+
+        private void FaturaButonunuEkle()
+        {
+            btnFaturaOlustur = new Button();
+            btnFaturaOlustur.Text = "📄 Kiralama Faturası / Dekont Oluştur";
+            btnFaturaOlustur.Size = new Size(280, 42);
+            btnFaturaOlustur.Location = new Point(8, 532);
+            btnFaturaOlustur.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnFaturaOlustur.FlatStyle = FlatStyle.Flat;
+            btnFaturaOlustur.FlatAppearance.BorderSize = 0;
+            btnFaturaOlustur.BackColor = Color.FromArgb(13, 110, 253);
+            btnFaturaOlustur.ForeColor = Color.White;
+            btnFaturaOlustur.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            btnFaturaOlustur.Cursor = Cursors.Hand;
+            btnFaturaOlustur.Click += BtnFaturaOlustur_Click;
+            tabPageOdemeler.Controls.Add(btnFaturaOlustur);
+
+            dgvOdemeler.Height = 490;
+        }
+
+        private void BtnFaturaOlustur_Click(object sender, EventArgs e)
+        {
+            if (dgvOdemeler.SelectedRows.Count == 0)
+            {
+                MessageBox.Show("Lütfen fatura/dekont oluşturmak istediğiniz bir ödeme kaydı seçin!", "Seçim Yapılmadı ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var seciliOdeme = dgvOdemeler.SelectedRows[0].DataBoundItem as Arac_Kiralama.models.Odeme;
+            if (seciliOdeme == null) return;
+
+            using (SaveFileDialog sfd = new SaveFileDialog())
+            {
+                sfd.Filter = "HTML Fatura Belgesi (*.html)|*.html";
+                sfd.FileName = $"Fatura_{seciliOdeme.Id}_{DateTime.Now:yyyyMMdd}.html";
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        string faturaNo = "FAT-" + DateTime.Now.Year + "-" + seciliOdeme.Id.ToString("D5");
+
+                        string htmlIcerik = $@"
+<!DOCTYPE html>
+<html lang='tr'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Kiralama Faturası - {faturaNo}</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 40px; color: #1e293b; }}
+        .invoice-box {{ max-width: 800px; margin: auto; padding: 35px; border-radius: 12px; background: #fff; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }}
+        .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0d6efd; padding-bottom: 20px; }}
+        .logo {{ font-size: 24px; font-weight: bold; color: #0d6efd; }}
+        .invoice-title {{ font-size: 20px; font-weight: bold; color: #334155; text-align: right; }}
+        .details {{ display: flex; justify-content: space-between; margin: 25px 0; }}
+        .table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+        .table th {{ background-color: #0f172a; color: #fff; padding: 12px; text-align: left; font-size: 14px; }}
+        .table td {{ padding: 14px 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }}
+        .total-box {{ text-align: right; margin-top: 25px; }}
+        .total-amount {{ font-size: 22px; font-weight: bold; color: #0d6efd; }}
+        .footer {{ margin-top: 40px; padding-top: 15px; border-top: 1px solid #cbd5e1; font-size: 12px; color: #64748b; text-align: center; }}
+    </style>
+</head>
+<body>
+    <div class='invoice-box'>
+        <div class='header'>
+            <div class='logo'>🚗 Yolcu360 Araç Kiralama</div>
+            <div class='invoice-title'>RESMİ KİRALAMA FATURASI<br><small style='font-size:13px; color:#64748b;'>{faturaNo}</small></div>
+        </div>
+        <div class='details'>
+            <div>
+                <strong>Hizmet Sağlayıcı:</strong><br>
+                Yolcu360 Otomasyon A.Ş.<br>
+                Vergi No: 9876543210<br>
+                İstanbul / Türkiye
+            </div>
+            <div style='text-align: right;'>
+                <strong>İşlem Tarihi:</strong> {seciliOdeme.IslemTarihi:dd.MM.yyyy HH:mm}<br>
+                <strong>Ödeme Durumu:</strong> <span style='color: #10b981; font-weight:bold;'>{seciliOdeme.Durum}</span><br>
+                <strong>Ödeme Tipi:</strong> iyzico Sandbox Sanal POS
+            </div>
+        </div>
+        <table class='table'>
+            <thead>
+                <tr>
+                    <th>Açıklama / Hizmet</th>
+                    <th>Araç Modeli</th>
+                    <th>Adet / Süre</th>
+                    <th style='text-align:right;'>Toplam Tutar</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Araç Kiralama Hizmeti Bedeli</td>
+                    <td><strong>{seciliOdeme.AracModeli}</strong></td>
+                    <td>1 Rezervasyon</td>
+                    <td style='text-align:right; font-weight:bold;'>{seciliOdeme.OdenenTutar}</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class='total-box'>
+            <p style='margin: 4px 0; color: #64748b;'>KDV (%20): Dahil</p>
+            <p style='margin: 4px 0;'>ÖDENEN TOPLAM TUTAR: <span class='total-amount'>{seciliOdeme.OdenenTutar}</span></p>
+        </div>
+        <div class='footer'>
+            Bu belge elektronik ortamda Yolcu360 Otomasyon Sistemi tarafından üretilmiştir. Resmi fatura / rezervasyon belgesi yerine geçer.
+        </div>
+    </div>
+</body>
+</html>";
+
+                        File.WriteAllText(sfd.FileName, htmlIcerik, Encoding.UTF8);
+
+                        var secim = MessageBox.Show("Fatura başarıyla oluşturuldu! 📄\n\nFaturayı şimdi tarayıcıda açmak ister misiniz?", "İşlem Başarılı ✅", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                        if (secim == DialogResult.Yes)
+                        {
+                            System.Diagnostics.Process.Start(sfd.FileName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Fatura kaydedilirken hata oluştu: " + ex.Message, "Hata ❌", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
             }
         }
 
@@ -116,7 +250,6 @@ namespace Arac_Kiralama
                     if (odemeForm.ShowDialog() == DialogResult.OK)
                     {
                         await OdemeleriYukle();
-                        // 💳 Ödeme bitince otomatik olarak "Geçmiş Ödemeler" sekmesine geç ki kullanıcı görsün!
                         tabControlGecmis.SelectedIndex = 1;
                     }
                 }
@@ -233,7 +366,6 @@ namespace Arac_Kiralama
 
                             g.Clear(System.Drawing.Color.White);
 
-                            // 1. Üst Başlık Kartı
                             using (System.Drawing.Brush bgBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(41, 128, 185)))
                             {
                                 g.FillRectangle(bgBrush, 0, 0, genislik, baslikYukseklik);
@@ -247,7 +379,6 @@ namespace Arac_Kiralama
                                 g.DrawString($"Kayıt Tarihi: {koleksiyon.KayitTarihi:dd.MM.yyyy HH:mm} | Toplam Araç: {dgvDetay.Rows.Count}", tarihFont, textBrush, 22, 50);
                             }
 
-                            // 2. Tablo Sütun Başlıkları
                             int currentY = baslikYukseklik;
                             using (System.Drawing.Brush headerBg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(52, 73, 94)))
                             using (System.Drawing.Font headerFont = new System.Drawing.Font("Segoe UI", 10, System.Drawing.FontStyle.Bold))
@@ -262,7 +393,6 @@ namespace Arac_Kiralama
                                 g.DrawString("Fiyat", headerFont, headerText, 760, currentY + 7);
                             }
 
-                            // 3. Tablo Satırları (Doğrudan Nesneden Güvenle Okunur 🎯)
                             currentY += sutunBaslikYukseklik;
                             using (System.Drawing.Font rowFont = new System.Drawing.Font("Segoe UI", 9.5f, System.Drawing.FontStyle.Regular))
                             using (System.Drawing.Font priceFont = new System.Drawing.Font("Segoe UI", 10f, System.Drawing.FontStyle.Bold))
@@ -280,7 +410,6 @@ namespace Arac_Kiralama
                                         g.FillRectangle(altRowBg, 0, currentY, genislik, satirYukseklik);
                                     }
 
-                                    // 🟢 Sütun ismi aramadan doğrudan nesneden güvenle okuma:
                                     var arac = row.DataBoundItem as Arac_Kiralama.models.Arac;
                                     string model = arac != null ? arac.AracModeli : (row.Cells[0]?.Value?.ToString() ?? "");
                                     string sirket = arac != null ? arac.KiralamaSirketi : (row.Cells[1]?.Value?.ToString() ?? "");
@@ -300,7 +429,6 @@ namespace Arac_Kiralama
                                 }
                             }
 
-                            // 4. Alt Bilgi
                             using (System.Drawing.Brush footerBg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(236, 240, 241)))
                             using (System.Drawing.Font footerFont = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Italic))
                             using (System.Drawing.Brush footerText = new System.Drawing.SolidBrush(System.Drawing.Color.Gray))
@@ -320,6 +448,66 @@ namespace Arac_Kiralama
                     }
                 }
             }
+        }
+
+        private void ModernKoyuTemaUygula()
+        {
+            this.BackColor = Color.FromArgb(24, 27, 32);
+            this.ForeColor = Color.FromArgb(241, 245, 249);
+            this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+
+            tabPageKoleksiyonlar.BackColor = Color.FromArgb(24, 27, 32);
+            tabPageOdemeler.BackColor = Color.FromArgb(24, 27, 32);
+
+            lblKoleksiyonlar.ForeColor = Color.FromArgb(203, 213, 225);
+            lblKoleksiyonDetay.ForeColor = Color.FromArgb(203, 213, 225);
+            lblOdemeler.ForeColor = Color.FromArgb(203, 213, 225);
+
+            btnKoleksiyonSil.FlatStyle = FlatStyle.Flat;
+            btnKoleksiyonSil.FlatAppearance.BorderSize = 0;
+            btnKoleksiyonSil.BackColor = Color.FromArgb(220, 38, 38);
+            btnKoleksiyonSil.ForeColor = Color.White;
+            btnKoleksiyonSil.Cursor = Cursors.Hand;
+
+            btnPngKaydet.FlatStyle = FlatStyle.Flat;
+            btnPngKaydet.FlatAppearance.BorderSize = 0;
+            btnPngKaydet.BackColor = Color.FromArgb(99, 102, 241);
+            btnPngKaydet.ForeColor = Color.White;
+            btnPngKaydet.Cursor = Cursors.Hand;
+
+            TabloKoyuStilUygula(dgvKoleksiyonlar);
+            TabloKoyuStilUygula(dgvKoleksiyonDetay);
+            TabloKoyuStilUygula(dgvOdemeler);
+        }
+
+        private void TabloKoyuStilUygula(DataGridView dgv)
+        {
+            if (dgv == null) return;
+
+            dgv.BackgroundColor = Color.FromArgb(24, 27, 32);
+            dgv.BorderStyle = BorderStyle.None;
+            dgv.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            dgv.GridColor = Color.FromArgb(51, 65, 85);
+            dgv.EnableHeadersVisualStyles = false;
+            dgv.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            dgv.ColumnHeadersHeight = 36;
+
+            dgv.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(15, 23, 42);
+            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(148, 163, 184);
+            dgv.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+
+            dgv.DefaultCellStyle.BackColor = Color.FromArgb(30, 34, 45);
+            dgv.DefaultCellStyle.ForeColor = Color.FromArgb(248, 250, 252);
+            dgv.DefaultCellStyle.Font = new Font("Segoe UI", 9f);
+            dgv.DefaultCellStyle.SelectionBackColor = Color.FromArgb(37, 99, 235);
+            dgv.DefaultCellStyle.SelectionForeColor = Color.White;
+
+            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(38, 43, 55);
+            dgv.AlternatingRowsDefaultCellStyle.ForeColor = Color.FromArgb(248, 250, 252);
+            dgv.AlternatingRowsDefaultCellStyle.SelectionBackColor = Color.FromArgb(37, 99, 235);
+            dgv.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
+
+            dgv.RowTemplate.Height = 32;
         }
     }
 }
