@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -21,8 +21,8 @@ namespace Arac_Kiralama
                 // Eğer giriş başarılı olursa DialogResult.OK dönecek
                 if (girisForm.ShowDialog() == DialogResult.OK)
                 {
-                    // 2. Giriş başarılı! Şimdi Anaform'u başlatıyoruz 🚀
-                    Application.Run(new Anaform());
+                    // 2. Giriş başarılı! Giriş yapan kullanıcı ile Anaform'u başlatıyoruz 🚀
+                    Application.Run(new Anaform(girisForm.GirisYapanKullanici));
                 }
             }
         }

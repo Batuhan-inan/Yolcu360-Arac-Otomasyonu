@@ -2,7 +2,6 @@ using Arac_Kiralama.models;
 using CefSharp;
 using CefSharp.WinForms;
 using Dapper;
-using Org.BouncyCastle.Asn1.Cmp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -23,6 +22,9 @@ namespace Arac_Kiralama
 
         // Rastgele sayı üretici
         private static readonly Random rnd = new Random();
+
+        // ⚡ Performans için Derlenmiş (Compiled) Regex Tanımları
+        private static readonly Regex FiyatTemizlemeRegex = new Regex(@"[^\d,.]", RegexOptions.Compiled);
 
         // 1. Veritabanından Kullanıcıyı Çekelim
         private kullanici aktifKullanici = null;
@@ -230,9 +232,10 @@ namespace Arac_Kiralama
             }
         }
         private ChromiumWebBrowser chromiumWebBrowser;
-        public Anaform()
+        public Anaform(kullanici girisYapanKullanici = null)
         {
             InitializeComponent();
+            this.aktifKullanici = girisYapanKullanici;
             this.WindowState = FormWindowState.Maximized;
 
             // 📐 Panel sol sınırını 690px yaparak sola doğru büyütüyoruz ve sağ kenara sıfırlıyoruz:
@@ -246,123 +249,200 @@ namespace Arac_Kiralama
 
         private void ModernKoyuTemaUygula()
         {
-            // 1. Form Genel Renk ve Font Ayarı
+            // 1. Form Genel Renk ve Font
             this.BackColor = Color.FromArgb(24, 27, 32);
             this.ForeColor = Color.FromArgb(241, 245, 249);
             this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
 
-            // 2. Etiketler (Labels)
-            var tumLabeller = new Label[] { label1, label2, label3, label4, label5, label6, label7 };
-            foreach (var lbl in tumLabeller)
-            {
-                if (lbl != null)
-                {
-                    lbl.ForeColor = Color.FromArgb(203, 213, 225);
-                    lbl.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-                }
-            }
+            // 2. SOL BÖLGE: ARAMA, TARİH VE FİLTRE DÜZENİ
+            // 1. Satır: Alış Yeri + Ara + Karşılaştır
+            label1.Text = "📍 Alış Yeri:";
+            label1.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            label1.ForeColor = Color.FromArgb(203, 213, 225);
+            label1.Location = new Point(15, 15);
+            label1.AutoSize = true;
 
-            // 3. Giriş Kutuları (TextBox & ComboBox)
-            var tumTextBoxlar = new TextBox[] { tbAlısyeri, tbKoleksiyonAdi };
-            foreach (var tb in tumTextBoxlar)
-            {
-                if (tb != null)
-                {
-                    tb.BackColor = Color.FromArgb(38, 43, 55);
-                    tb.ForeColor = Color.White;
-                    tb.BorderStyle = BorderStyle.FixedSingle;
-                    tb.Font = new Font("Segoe UI", 10f);
-                }
-            }
+            tbAlısyeri.Location = new Point(15, 38);
+            tbAlısyeri.Size = new Size(240, 28);
+            tbAlısyeri.BackColor = Color.FromArgb(38, 43, 55);
+            tbAlısyeri.ForeColor = Color.White;
+            tbAlısyeri.BorderStyle = BorderStyle.FixedSingle;
+            tbAlısyeri.Font = new Font("Segoe UI", 10.5f);
 
-            var tumCombolar = new ComboBox[] { cbAlısSaati, cbDonusSaati, cbYakit, cbVites };
-            foreach (var cb in tumCombolar)
-            {
-                if (cb != null)
-                {
-                    cb.BackColor = Color.FromArgb(38, 43, 55);
-                    cb.ForeColor = Color.White;
-                    cb.FlatStyle = FlatStyle.Flat;
-                    cb.Font = new Font("Segoe UI", 9.5f);
-                }
-            }
+            btnAra.Text = "🔍 Ara";
+            btnAra.Location = new Point(270, 28);
+            btnAra.Size = new Size(130, 42);
+            btnAra.FlatStyle = FlatStyle.Flat;
+            btnAra.FlatAppearance.BorderSize = 0;
+            btnAra.BackColor = Color.FromArgb(13, 110, 253);
+            btnAra.ForeColor = Color.White;
+            btnAra.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
+            btnAra.Cursor = Cursors.Hand;
 
-            // 4. DateTimePicker'lar
-            var tumDtpler = new DateTimePicker[] { dtpAlisTarihi, dtpVerisTarihi };
-            foreach (var dtp in tumDtpler)
-            {
-                if (dtp != null)
-                {
-                    dtp.Font = new Font("Segoe UI", 9.5f);
-                    dtp.CalendarMonthBackground = Color.FromArgb(38, 43, 55);
-                    dtp.CalendarForeColor = Color.White;
-                    dtp.CalendarTitleBackColor = Color.FromArgb(13, 110, 253);
-                    dtp.CalendarTitleForeColor = Color.White;
-                }
-            }
+            // 2. Satır: Alış & Dönüş Tarih / Saatleri
+            label2.Text = "📅 Alış Tarihi:";
+            label2.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label2.ForeColor = Color.FromArgb(203, 213, 225);
+            label2.Location = new Point(15, 78);
+            label2.AutoSize = true;
 
-            // 5. Butonlar (Modern Flat Stiller)
-            if (btnAra != null)
-            {
-                btnAra.FlatStyle = FlatStyle.Flat;
-                btnAra.FlatAppearance.BorderSize = 0;
-                btnAra.BackColor = Color.FromArgb(13, 110, 253);
-                btnAra.ForeColor = Color.White;
-                btnAra.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
-                btnAra.Cursor = Cursors.Hand;
-            }
+            dtpAlisTarihi.Location = new Point(15, 98);
+            dtpAlisTarihi.Size = new Size(140, 26);
+            dtpAlisTarihi.Font = new Font("Segoe UI", 9.5f);
 
-            if (btnKoleksiyonKaydet != null)
-            {
-                btnKoleksiyonKaydet.FlatStyle = FlatStyle.Flat;
-                btnKoleksiyonKaydet.FlatAppearance.BorderSize = 0;
-                btnKoleksiyonKaydet.BackColor = Color.FromArgb(16, 185, 129);
-                btnKoleksiyonKaydet.ForeColor = Color.White;
-                btnKoleksiyonKaydet.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-                btnKoleksiyonKaydet.Cursor = Cursors.Hand;
-            }
+            label3.Text = "⏰ Saat:";
+            label3.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label3.ForeColor = Color.FromArgb(203, 213, 225);
+            label3.Location = new Point(165, 78);
+            label3.AutoSize = true;
 
-            if (btnGecmisOdemeler != null)
-            {
-                btnGecmisOdemeler.FlatStyle = FlatStyle.Flat;
-                btnGecmisOdemeler.FlatAppearance.BorderSize = 0;
-                btnGecmisOdemeler.BackColor = Color.FromArgb(99, 102, 241);
-                btnGecmisOdemeler.ForeColor = Color.White;
-                btnGecmisOdemeler.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-                btnGecmisOdemeler.Cursor = Cursors.Hand;
-            }
+            cbAlısSaati.Location = new Point(165, 98);
+            cbAlısSaati.Size = new Size(85, 26);
+            cbAlısSaati.BackColor = Color.FromArgb(38, 43, 55);
+            cbAlısSaati.ForeColor = Color.White;
+            cbAlısSaati.FlatStyle = FlatStyle.Flat;
 
-            if (btnGecmisKoleksiyonlar != null)
-            {
-                btnGecmisKoleksiyonlar.FlatStyle = FlatStyle.Flat;
-                btnGecmisKoleksiyonlar.FlatAppearance.BorderSize = 0;
-                btnGecmisKoleksiyonlar.BackColor = Color.FromArgb(51, 65, 85);
-                btnGecmisKoleksiyonlar.ForeColor = Color.FromArgb(241, 245, 249);
-                btnGecmisKoleksiyonlar.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
-                btnGecmisKoleksiyonlar.Cursor = Cursors.Hand;
-            }
+            label4.Text = "📅 Dönüş Tarihi:";
+            label4.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label4.ForeColor = Color.FromArgb(203, 213, 225);
+            label4.Location = new Point(270, 78);
+            label4.AutoSize = true;
 
-            // 7. İstatistik & Dashboard Butonu
+            dtpVerisTarihi.Location = new Point(270, 98);
+            dtpVerisTarihi.Size = new Size(140, 26);
+            dtpVerisTarihi.Font = new Font("Segoe UI", 9.5f);
+
+            label5.Text = "⏰ Saat:";
+            label5.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label5.ForeColor = Color.FromArgb(203, 213, 225);
+            label5.Location = new Point(420, 78);
+            label5.AutoSize = true;
+
+            cbDonusSaati.Location = new Point(420, 98);
+            cbDonusSaati.Size = new Size(85, 26);
+            cbDonusSaati.BackColor = Color.FromArgb(38, 43, 55);
+            cbDonusSaati.ForeColor = Color.White;
+            cbDonusSaati.FlatStyle = FlatStyle.Flat;
+
+            // 3. Satır: Vites & Yakıt Filtreleri + Karşılaştır Butonu
+            label7.Text = "⚙️ Vites:";
+            label7.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label7.ForeColor = Color.FromArgb(203, 213, 225);
+            label7.Location = new Point(15, 138);
+            label7.AutoSize = true;
+
+            cbVites.Location = new Point(15, 158);
+            cbVites.Size = new Size(115, 26);
+            cbVites.BackColor = Color.FromArgb(38, 43, 55);
+            cbVites.ForeColor = Color.White;
+            cbVites.FlatStyle = FlatStyle.Flat;
+
+            label6.Text = "⛽ Yakıt:";
+            label6.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            label6.ForeColor = Color.FromArgb(203, 213, 225);
+            label6.Location = new Point(140, 138);
+            label6.AutoSize = true;
+
+            cbYakit.Location = new Point(140, 158);
+            cbYakit.Size = new Size(115, 26);
+            cbYakit.BackColor = Color.FromArgb(38, 43, 55);
+            cbYakit.ForeColor = Color.White;
+            cbYakit.FlatStyle = FlatStyle.Flat;
+
+            // Karşılaştır Butonu (Filtrelerin Hemen Yanında)
+            var btnKarsilastir = new Button();
+            btnKarsilastir.Text = "⚖️ Araçları Karşılaştır";
+            btnKarsilastir.Location = new Point(270, 150);
+            btnKarsilastir.Size = new Size(235, 36);
+            btnKarsilastir.FlatStyle = FlatStyle.Flat;
+            btnKarsilastir.FlatAppearance.BorderSize = 0;
+            btnKarsilastir.BackColor = Color.FromArgb(2, 132, 199);
+            btnKarsilastir.ForeColor = Color.White;
+            btnKarsilastir.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            btnKarsilastir.Cursor = Cursors.Hand;
+            btnKarsilastir.Click += BtnKarsilastir_Click;
+            this.Controls.Add(btnKarsilastir);
+
+            // 3. SAĞ BÖLGE: YÖNETİCİ & İŞLEM BUTONLARI
+            // Üst Menü Çubuğu (Y: 28px)
             var btnDashboard = new Button();
-            btnDashboard.Text = "📈 İstatistik & Dashboard";
-            btnDashboard.Size = new Size(160, 32);
-            btnDashboard.Location = new Point(1185, 31);
+            btnDashboard.Text = "📈 İstatistikler";
+            btnDashboard.Location = new Point(700, 28);
+            btnDashboard.Size = new Size(140, 36);
             btnDashboard.FlatStyle = FlatStyle.Flat;
             btnDashboard.FlatAppearance.BorderSize = 0;
-            btnDashboard.BackColor = Color.FromArgb(245, 158, 11);
+            btnDashboard.BackColor = Color.FromArgb(217, 119, 6);
             btnDashboard.ForeColor = Color.White;
             btnDashboard.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
             btnDashboard.Cursor = Cursors.Hand;
-            btnDashboard.Click += (s, e) =>
-            {
-                DashboardForm df = new DashboardForm();
-                df.ShowDialog();
-            };
+            btnDashboard.Click += (s, e) => { new DashboardForm().ShowDialog(); };
             this.Controls.Add(btnDashboard);
 
-            // 6. DataGridView (Modern Koyu Tablo Tasarımı)
+            btnGecmisOdemeler.Text = "💳 Geçmiş Ödemeler";
+            btnGecmisOdemeler.Location = new Point(855, 28);
+            btnGecmisOdemeler.Size = new Size(160, 36);
+            btnGecmisOdemeler.FlatStyle = FlatStyle.Flat;
+            btnGecmisOdemeler.FlatAppearance.BorderSize = 0;
+            btnGecmisOdemeler.BackColor = Color.FromArgb(99, 102, 241);
+            btnGecmisOdemeler.ForeColor = Color.White;
+            btnGecmisOdemeler.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            btnGecmisOdemeler.Cursor = Cursors.Hand;
+
+            btnGecmisKoleksiyonlar.Text = "📂 Koleksiyonlar";
+            btnGecmisKoleksiyonlar.Location = new Point(1030, 28);
+            btnGecmisKoleksiyonlar.Size = new Size(150, 36);
+            btnGecmisKoleksiyonlar.FlatStyle = FlatStyle.Flat;
+            btnGecmisKoleksiyonlar.FlatAppearance.BorderSize = 0;
+            btnGecmisKoleksiyonlar.BackColor = Color.FromArgb(71, 85, 105);
+            btnGecmisKoleksiyonlar.ForeColor = Color.White;
+            btnGecmisKoleksiyonlar.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            btnGecmisKoleksiyonlar.Cursor = Cursors.Hand;
+
+            bool isAdmin = (aktifKullanici != null && (string.Equals(aktifKullanici.Rol, "Admin", StringComparison.OrdinalIgnoreCase) || (aktifKullanici.Eposta != null && aktifKullanici.Eposta.ToLower().Contains("admin"))));
+
+            var btnProfil = new Button();
+            btnProfil.Text = isAdmin ? "👑 Admin Paneli" : "👤 Profilim";
+            btnProfil.Location = new Point(1195, 28);
+            btnProfil.Size = new Size(140, 36);
+            btnProfil.FlatStyle = FlatStyle.Flat;
+            btnProfil.FlatAppearance.BorderSize = 0;
+            btnProfil.BackColor = isAdmin ? Color.FromArgb(124, 58, 237) : Color.FromArgb(13, 148, 136);
+            btnProfil.ForeColor = Color.White;
+            btnProfil.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            btnProfil.Cursor = Cursors.Hand;
+            btnProfil.Click += (s, e) =>
+            {
+                ProfilForm pf = new ProfilForm(this.aktifKullanici);
+                pf.ShowDialog();
+            };
+            this.Controls.Add(btnProfil);
+
+            // Koleksiyon Kaydetme Alanı (Y: 150px)
+            tbKoleksiyonAdi.Location = new Point(700, 155);
+            tbKoleksiyonAdi.Size = new Size(200, 26);
+            tbKoleksiyonAdi.BackColor = Color.FromArgb(38, 43, 55);
+            tbKoleksiyonAdi.ForeColor = Color.White;
+            tbKoleksiyonAdi.BorderStyle = BorderStyle.FixedSingle;
+            tbKoleksiyonAdi.Font = new Font("Segoe UI", 10f);
+
+            btnKoleksiyonKaydet.Text = "💾 Koleksiyon Kaydet";
+            btnKoleksiyonKaydet.Location = new Point(915, 150);
+            btnKoleksiyonKaydet.Size = new Size(170, 36);
+            btnKoleksiyonKaydet.FlatStyle = FlatStyle.Flat;
+            btnKoleksiyonKaydet.FlatAppearance.BorderSize = 0;
+            btnKoleksiyonKaydet.BackColor = Color.FromArgb(16, 185, 129);
+            btnKoleksiyonKaydet.ForeColor = Color.White;
+            btnKoleksiyonKaydet.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            btnKoleksiyonKaydet.Cursor = Cursors.Hand;
+
+            // 4. ALT BÖLGE: TABLO VE TARAYICI YERLEŞİMİ
             if (dgbVeriEkranı != null)
             {
+                dgbVeriEkranı.Location = new Point(15, 205);
+                dgbVeriEkranı.Width = 660;
+                dgbVeriEkranı.Height = this.ClientSize.Height - 220;
+                dgbVeriEkranı.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+
                 dgbVeriEkranı.BackgroundColor = Color.FromArgb(24, 27, 32);
                 dgbVeriEkranı.BorderStyle = BorderStyle.None;
                 dgbVeriEkranı.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
@@ -387,6 +467,14 @@ namespace Arac_Kiralama
                 dgbVeriEkranı.AlternatingRowsDefaultCellStyle.SelectionForeColor = Color.White;
 
                 dgbVeriEkranı.RowTemplate.Height = 34;
+            }
+
+            if (panel != null)
+            {
+                panel.Location = new Point(690, 205);
+                panel.Width = this.ClientSize.Width - 705;
+                panel.Height = this.ClientSize.Height - 220;
+                panel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             }
         }
 
@@ -1531,7 +1619,7 @@ namespace Arac_Kiralama
 
             try
             {
-                string temiz = Regex.Replace(hamFiyat, @"[^\d,.]", "").Replace(".", "").Replace(",", ".");
+                string temiz = FiyatTemizlemeRegex.Replace(hamFiyat, "").Replace(".", "").Replace(",", ".");
                 if (double.TryParse(temiz, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double tlFiyat) && tlFiyat > 0)
                 {
                     double usdFiyat = tlFiyat / DolarKuru;
@@ -1659,9 +1747,38 @@ namespace Arac_Kiralama
             }
         }
 
-        private void button2_Click(object sender, EventArgs e)
+        private void BtnKarsilastir_Click(object sender, EventArgs e)
         {
+            if (dgbVeriEkranı.SelectedRows.Count < 2)
+            {
+                MessageBox.Show("Lütfen karşılaştırmak için tablodan en az 2 (en fazla 3) araç seçiniz!\n\n💡 İpucu: Klavyeden 'Ctrl' tuşuna basılı tutarak birden fazla satıra tıklayabilirsiniz.", "Yetersiz Seçim ⚠️", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
 
+            var secilenler = new List<Arac>();
+            foreach (DataGridViewRow row in dgbVeriEkranı.SelectedRows)
+            {
+                if (row.IsNewRow) continue;
+                string model = row.Cells[0]?.Value?.ToString() ?? "";
+                string sirket = row.Cells[1]?.Value?.ToString() ?? "";
+                string vites = row.Cells[2]?.Value?.ToString() ?? "";
+                string yakit = row.Cells[3]?.Value?.ToString() ?? "";
+                string fiyat = row.Cells[4]?.Value?.ToString() ?? "";
+
+                secilenler.Add(new Arac
+                {
+                    AracModeli = model,
+                    KiralamaSirketi = sirket,
+                    VitesTipi = vites,
+                    YakitTipi = yakit,
+                    Fiyat = fiyat
+                });
+
+                if (secilenler.Count >= 3) break;
+            }
+
+            AracKarsilastirForm kf = new AracKarsilastirForm(secilenler);
+            kf.ShowDialog();
         }
     }
 }

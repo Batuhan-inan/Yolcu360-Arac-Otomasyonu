@@ -109,6 +109,8 @@ namespace Arac_Kiralama
             }
         }
 
+        public kullanici GirisYapanKullanici { get; private set; }
+
         private void btngiris_Click(object sender, EventArgs e)
         {
             string eposta = tbEposta.Text.Trim();
@@ -128,13 +130,8 @@ namespace Arac_Kiralama
 
             if (kullanici != null)
             {
-                // Ana form ekranını açıyoruz 🚀
-                Anaform anaForm = new Anaform();
-
-                // AnaForm kapandığında uygulamanın da tamamen kapanmasını sağlıyoruz 🛑
-                anaForm.FormClosed += (s, args) => Application.Exit();
-
-                // LoginForm'u tamamen kapatıyoruz 🚪
+                // Giriş yapan kullanıcıyı saklayıp formu kapatıyoruz 🚪
+                this.GirisYapanKullanici = kullanici;
                 this.DialogResult = DialogResult.OK;
                 this.Close();
             }

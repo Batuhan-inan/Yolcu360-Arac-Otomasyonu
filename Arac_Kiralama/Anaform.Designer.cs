@@ -231,7 +231,6 @@ namespace Arac_Kiralama
             this.btnGecmisOdemeler.Text = "Geçmiş Ödemeler";
             this.btnGecmisOdemeler.UseVisualStyleBackColor = true;
             this.btnGecmisOdemeler.Click += new System.EventHandler(this.btnGecmisOdemeler_Click);
-            this.btnGecmisOdemeler.Click += new System.EventHandler(this.button2_Click);
             // 
             // Anaform
             // 

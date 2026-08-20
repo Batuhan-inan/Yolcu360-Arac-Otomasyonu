@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
@@ -17,7 +17,7 @@ namespace Arac_Kiralama
             return new MySqlConnection(connectionString);
         }
 
-        internal static object QueryFirstOrDefault<T>(string sql, object value)
+        internal static T QueryFirstOrDefault<T>(string sql, object value)
         {
             // 1. GetConnection() ile MySQL bağlantısını alıyoruz 
             using (var conn = GetConnection())

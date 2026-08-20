@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System;
 
 namespace Arac_Kiralama.models
 {
@@ -11,7 +7,7 @@ namespace Arac_Kiralama.models
         public int Id { get; set; }
         public string Telefon { get; set; }
         public string Sifre { get; set; }
-
         public string Eposta { get; set; }
+        public string Rol { get; set; } = "Musteri";
     }
 }

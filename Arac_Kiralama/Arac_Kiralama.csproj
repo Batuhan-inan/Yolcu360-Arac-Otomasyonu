@@ -140,6 +140,12 @@
     <Compile Include="Anaform.Designer.cs">
       <DependentUpon>Anaform.cs</DependentUpon>
     </Compile>
+    <Compile Include="AracKarsilastirForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="AracKarsilastirForm.Designer.cs">
+      <DependentUpon>AracKarsilastirForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="DashboardForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -164,6 +170,12 @@
     </Compile>
     <Compile Include="giris_ekrani.Designer.cs">
       <DependentUpon>giris_ekrani.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ProfilForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ProfilForm.Designer.cs">
+      <DependentUpon>ProfilForm.cs</DependentUpon>
     </Compile>
     <Compile Include="keyhandler.cs" />
     <Compile Include="models\Arac.cs" />
